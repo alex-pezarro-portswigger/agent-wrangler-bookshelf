@@ -75,7 +75,7 @@ package.json            wranglerExtension block (id, label, description, require
 package-lock.json       required because of zod
 index.js                manifest
 store.js                BookshelfStore
-paths.js                canonicalise(path): expand ~, path.resolve, fs.realpath
+safe-file.js            canonicalise, use-time re-check, bounded descriptor-based read
 tools/                  shelve-file.js, unshelve-file.js
 handlers.js             bookshelf-read / -open-link / -reveal / -open / -unshelve
 os-open.js              per-platform reveal/open commands
@@ -117,11 +117,12 @@ clear message).
 
 Deliberately short. Shelve:
 
-- plans, specs and design docs;
+- plans, specs and design docs, wherever they are written (including inside the repository, e.g.
+  `docs/plans/`, `docs/superpowers/specs/`);
 - any markdown you create outside the main repository (scratchpad notes, reports, summaries);
 - outputs the human asked for or should review (generated reports, exported data, screenshots).
 
-Don't shelve files that are ordinary repo changes, or throwaway debugging output. Use a shelf label
+Don't shelve other files that are ordinary repo changes (source, tests, config), or throwaway debugging output. Use a shelf label
 that says what the group is (`Plans`, `Scratchpad`, `Reports`). Unshelve files you delete or
 supersede.
 
@@ -202,9 +203,38 @@ Commands run with `execFile`/`spawn` and argument arrays (no shell), detached.
 - A read of a missing file replies `{ kind: 'missing' }`; the preview says so and the row is dimmed
   from then on.
 
+## Security
+
+The extension reads the user's files and hands their bytes to the browser, so every file operation
+goes through one module (`safe-file.js`) that enforces:
+
+- **Canonical paths only.** Input is tilde-expanded, `path.resolve`d (removing `..`) and
+  `fs.realpath`ed (resolving every symlink) before use. Relative paths are refused. NUL bytes and
+  non-string input are refused.
+- **Shelf membership is the allowlist.** Browser-initiated read/reveal/open/unshelve act only on a
+  canonical path that is on the requesting session's shelf. A session id that has no shelf, or a
+  path that isn't on it, is refused. The browser can add to the shelf only via a chat link click,
+  limited to existing `.md`/`.markdown` regular files (core `GET /file`'s scope).
+- **Re-checked at use time (no path rewrite / swap).** A stored path is re-`realpath`ed at every use
+  and must still equal itself, so a file replaced by a symlink after shelving (or a parent directory
+  swapped for a symlink) is refused. Reads open the file once, `fstat` the open descriptor and
+  require a regular file within the size limit, then read from that descriptor, so the checked file
+  is the one read. Directories, devices, FIFOs and sockets are refused.
+- **No shell.** OS commands run via `execFile`/`spawn` with argument arrays; paths are absolute
+  canonical paths, so they can't be read as options. `app` for *Open with* must exactly match one of
+  the configured apps; it is never taken from free text.
+- **Rendering stays inert.** File names and text go in via `textContent`; markdown uses core's
+  renderer (raw HTML escaped); images (including SVG) are shown through `<img>`, where scripts do not
+  run.
+- **Bounded.** 5 MB read cap, 200 entries per session, shelf labels ≤ 60 characters.
+
+Agents can shelve any regular file they name; an agent is already trusted with the user's
+filesystem, and the shelf only shows the file to the same user on the local board.
+
 ## Testing
 
-- `node --test`: store (add/dedupe/cap/remove/forget/persist), canonicalise (`~`, `..`, symlinks),
+- `node --test`: safe-file (symlink swap after shelving, `..`, `~`, relative, NUL, directory/FIFO,
+  over-size), store (add/dedupe/cap/remove/forget/persist), canonicalise (`~`, `..`, symlinks),
   tools (caller resolution, validation, default shelf), handlers (refuse unshelved paths, open-link
   limited to existing markdown, per-platform command construction with a stubbed spawner, read kinds
   and size limits), tree building (grouping, nesting, compaction).
