@@ -17,6 +17,11 @@ const ICONS = {
   text: SVG('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>'),
   image: SVG('<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/>'),
   file: SVG('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>'),
+  download: SVG('<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/>'),
+  reveal: SVG('<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>'),
+  open: SVG('<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>'),
+  openWith: SVG('<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/>'),
+  trash: SVG('<path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
 };
 
 let api = null;
@@ -53,8 +58,8 @@ function el(tag, className, text) {
   return node;
 }
 
-function iconButton(icon, title, onClick) {
-  const b = el('button', 'bks-btn');
+function iconButton(icon, title, onClick, className = 'icon-ghost') {
+  const b = el('button', className);
   b.type = 'button';
   b.title = title;
   b.setAttribute('aria-label', title);
@@ -101,16 +106,16 @@ function build() {
 
   const shelf = el('section', 'bks-shelf');
   shelf.setAttribute('aria-label', 'Bookshelf');
-  const head = el('header', 'bks-head');
-  head.append(el('span', 'bks-title', 'Bookshelf'), iconButton('swap', 'Switch side', switchSide), iconButton('close', 'Close bookshelf', () => setOpen(false)));
+  const head = el('header', 'diff-head bks-head');
+  head.append(el('span', 'diff-title bks-title', 'Bookshelf'), iconButton('swap', 'Switch side', switchSide), iconButton('close', 'Close bookshelf', () => setOpen(false)));
   els.list = el('div', 'bks-list');
   els.empty = el('p', 'bks-empty', 'Nothing on the shelf yet.');
   shelf.append(head, els.list, els.empty);
 
   const preview = el('section', 'bks-preview');
   preview.setAttribute('aria-label', 'File preview');
-  const phead = el('header', 'bks-head');
-  els.pTitle = el('span', 'bks-title');
+  const phead = el('header', 'diff-head bks-head');
+  els.pTitle = el('span', 'diff-title bks-title');
   phead.append(els.pTitle,
     iconButton('more', 'File actions', (e) => selected && openMenu(e.currentTarget, selected)),
     iconButton('close', 'Close preview', closePreview));
@@ -208,7 +213,7 @@ function nodeEl(node, depth) {
   row.title = node.path;
   row.style.paddingLeft = indent;
   row.innerHTML = isImage(node.path) ? ICONS.image : isText(node.path) ? ICONS.text : ICONS.file;
-  row.append(el('span', 'bks-name', node.name), iconButton('more', 'File actions', (e) => openMenu(e.currentTarget, node.path)));
+  row.append(el('span', 'bks-name', node.name), iconButton('more', 'File actions', (e) => openMenu(e.currentTarget, node.path), 'bks-row-btn'));
   row.addEventListener('click', () => selectFile(node.path));
   row.addEventListener('keydown', (e) => {
     if (e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); selectFile(node.path); }
@@ -267,7 +272,7 @@ function status(text, actions = false) {
     const path = selected;
     const row = el('div', 'bks-actions');
     for (const [label, fn] of [['Open', () => send('bookshelf-open', path)], ['Show in folder', () => send('bookshelf-reveal', path)]]) {
-      const b = el('button', 'bks-action', label);
+      const b = el('button', null, label);
       b.type = 'button';
       b.addEventListener('click', fn);
       row.append(b);
@@ -345,6 +350,7 @@ function menuEl(items) {
     const b = el('button', `context-menu-item${it.danger ? ' danger' : ''}`);
     b.type = 'button';
     b.setAttribute('role', 'menuitem');
+    b.innerHTML = ICONS[it.icon];
     b.append(el('span', null, it.label));
     b.addEventListener('click', () => { closeMenus(); it.run(); });
     menu.append(b);
@@ -363,12 +369,12 @@ function position(menu, x, y) {
 function openMenu(anchor, path) {
   closeMenus();
   const menu = menuEl([
-    { label: 'Download', run: () => download(path) },
-    { label: 'Show in folder', run: () => send('bookshelf-reveal', path) },
-    { label: 'Open', run: () => send('bookshelf-open', path) },
-    ...(platform === 'darwin' || platform === 'win32' ? [{ label: 'Open with…', run: () => send('bookshelf-open', path, { chooser: true }) }] : []),
+    { label: 'Download', icon: 'download', run: () => download(path) },
+    { label: 'Show in folder', icon: 'reveal', run: () => send('bookshelf-reveal', path) },
+    { label: 'Open', icon: 'open', run: () => send('bookshelf-open', path) },
+    ...(platform === 'darwin' || platform === 'win32' ? [{ label: 'Open with…', icon: 'openWith', run: () => send('bookshelf-open', path, { chooser: true }) }] : []),
     null,
-    { label: 'Remove from bookshelf', danger: true, run: () => remove(path) },
+    { label: 'Remove from bookshelf', icon: 'trash', danger: true, run: () => remove(path) },
   ]);
   const at = anchor instanceof Element ? anchor.getBoundingClientRect() : null;
   position(menu, at ? at.left : anchor.x, at ? at.bottom + 2 : anchor.y);
