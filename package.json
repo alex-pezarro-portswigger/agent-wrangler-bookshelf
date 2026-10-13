@@ -1,0 +1,24 @@
+{
+  "name": "agent-wrangler-bookshelf",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent Wrangler extension: a per-session bookshelf of files the agent puts in front of the human, with an in-place preview.",
+  "license": "Apache-2.0",
+  "scripts": {
+    "test": "node --test"
+  },
+  "wranglerExtension": {
+    "id": "bookshelf",
+    "label": "Bookshelf",
+    "description": "A per-session panel of the plans, specs and reports an agent wants you to see, with an in-place preview and open, reveal and download actions.",
+    "author": "James Kinley",
+    "requires": ["board:rebuild", "board:broadcast"]
+  },
+  "dependencies": {
+    "zod": "^3.25.76"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
