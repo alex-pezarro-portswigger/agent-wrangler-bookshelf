@@ -48,8 +48,8 @@ Built purely on the existing extension API (host API 1.26). No core changes.
   stays on that side for future sessions.
 - **GIVEN** the board's theme changes **WHEN** the bookshelf is showing **THEN** it follows the new
   theme.
-- **GIVEN** a shelved file has since been deleted **WHEN** the bookshelf is open **THEN** it is shown
-  as missing rather than failing.
+- **GIVEN** a shelved file has since been deleted **WHEN** the human selects it **THEN** the preview
+  says it is missing rather than failing.
 
 ## Architecture
 
@@ -62,7 +62,7 @@ browser: panel.metaChip (count chip + session tracking) ──▶ bookshelf pane
          capture-phase click on #chat-stream [data-md-path] ──┘        │
                                                                       │ api.send(bookshelf-*)
                                                                       ▼
-                       handlers: read (bytes via host.broadcast), reveal, open, shelve, unshelve
+                       handlers: read, open-link (replies via host.broadcast), reveal, open, unshelve
 ```
 
 ### Repository layout
@@ -70,11 +70,14 @@ browser: panel.metaChip (count chip + session tracking) ──▶ bookshelf pane
 Mirrors `agent-wrangler-mermaid` and the core checklist extension:
 
 ```
-package.json            wranglerExtension block, "type": "module", no runtime deps
+package.json            wranglerExtension block (id, label, description, requires), "type": "module",
+                        one runtime dependency: zod (MCP tool input schemas must be zod)
+package-lock.json       required because of zod
 index.js                manifest
 store.js                BookshelfStore
-tools/                  shelve-file.js, unshelve-file.js, list-bookshelf.js
-handlers.js             bookshelf-read / -reveal / -open / -shelve / -unshelve
+paths.js                canonicalise(path): expand ~, path.resolve, fs.realpath
+tools/                  shelve-file.js, unshelve-file.js
+handlers.js             bookshelf-read / -open-link / -reveal / -open / -unshelve
 os-open.js              per-platform reveal/open commands
 skills/bookshelf/SKILL.md
 public/client.js        chip, panel, tree, preview, context menu, chat-click capture
@@ -85,8 +88,10 @@ README.md, LICENSE
 
 ### Manifest
 
-- `id: 'bookshelf'`, `defaultEnabled: true`, `engines.wranglerApi: '^1.26.0'`.
-- `requires: ['board:rebuild', 'board:broadcast']`.
+- `id: 'bookshelf'`, `defaultEnabled: true`, `engines.wranglerApi: '^1.26.0'`, `dir` exported as
+  checklist and mermaid do.
+- `requires: ['board:rebuild', 'board:broadcast']`, mirrored in `package.json`'s
+  `wranglerExtension.requires` (install fails otherwise).
 - `stores: { bookshelf }`, `graph: ({host}) => ({ bookshelf: host.stores.bookshelf.snapshot() })`.
 - `tools`, `handlers`, `skills: ['bookshelf']`, `client`, `styles`.
 - `session.onPurge` forgets the session's shelf (archive keeps it, as checklist does).
@@ -94,19 +99,19 @@ README.md, LICENSE
 
 ### Store
 
-`BookshelfStore`, the checklist store's shape: in-memory map, synchronous mutators, atomic JSON
-persistence to `<AW_DATA_DIR or ~/.agent-wrangler>/bookshelf.json`, keyed on card id.
+`BookshelfStore`, the checklist store's shape: in-memory map, synchronous mutators, JSON persistence
+(own tmp-file + rename; core's `atomic-json` cannot be imported) to
+`<AW_DATA_DIR (tilde-expanded) or ~/.agent-wrangler>/bookshelf.json`, keyed on card id.
 
-Entry: `{ path, shelf, addedAt }`. `path` is absolute and realpath-resolved; re-shelving the same
-path updates its shelf rather than duplicating. Cap of 200 entries per session (throws with a clear
-message).
+Entry: `{ path, shelf, addedAt }`. `path` is canonical (see `paths.js`); re-shelving the same path
+updates its shelf but keeps `addedAt` and its position. Cap of 200 entries per session (throws with a
+clear message).
 
 ### Agent tools (caller-resolved, no session parameter)
 
-- `shelve_file({ path, shelf? })`: path must be absolute (or `~`), exist and be a regular file.
-  `shelf` defaults to the parent directory's name. Rebuilds the board.
+- `shelve_file({ path, shelf? })`: path must be absolute (or `~`), exist and be a regular file; it is
+  canonicalised before storing. `shelf` defaults to the parent directory's name. Rebuilds the board.
 - `unshelve_file({ path })`.
-- `list_bookshelf()`: the caller's entries.
 
 ### Skill (`bookshelf`)
 
@@ -126,17 +131,24 @@ supersede.
 file count (hidden when zero) in the session header. Its `update(el, session, graph)` is also how the
 client learns the selected session and its shelf, so the open panel re-renders from `graph.bookshelf`.
 
-**Panel.** Own DOM appended to `#sidebar`, absolutely positioned over the terminal/chat area on the
-chosen edge (default right), ~260px wide, sliding in with a CSS transform. Header: "Bookshelf",
-a side toggle (⇆) and close. Side is stored in `api.storage`. Closed by default; opened by the chip
-or a chat file click. Removed entirely when the extension's `<link data-ext="bookshelf">` disappears
-(mermaid's disable detection).
+**Panel.** Own DOM appended to `#sidebar`; the extension's CSS sets `#sidebar { position: relative }`
+(it has none today). The panel is absolutely positioned on the chosen edge (default right), ~260px
+wide, with `top` set to the visible `#term-wrap`/`#chat-wrap`'s `offsetTop` and `bottom: 0`, so the
+session header, chips and checklist stay visible. `top` is recomputed on every chip `update` and on
+open. It slides in with a CSS transform. Header: "Bookshelf", a side toggle (⇆) and close. Side is
+stored in `api.storage`. Closed by default; opened by the chip or a chat file click. On a session
+switch it stays open and re-renders from the new session's shelf; with no session selected,
+`#sidebar` is collapsed and hides it.
 
-**Tree.** One group per shelf, in first-added order; group header is the shelf label with a chevron
+Client state (open, side, selected file, current session and shelf) lives at module level, because
+the chip host is rebuilt on every render. When the extension's `<link data-ext="bookshelf">`
+disappears (mermaid's disable detection) the panel is removed **and** the document capture listeners
+are detached, so chat links fall back to the core preview.
+
+**Tree.** One group per shelf, in order of each shelf's first `addedAt`; group header is the shelf label with a chevron
 and count, collapsible (collapse state in `api.storage`). Within a group, files nest under folders
 relative to the group's common ancestor directory; single-child folder chains are compacted
-(`a/b/c`). Rows show a small type glyph and name; hover shows the full path. Missing files are shown
-dimmed with a "missing" hint.
+(`a/b/c`). Rows show a small type glyph and name; hover shows the full path.
 
 **Preview.** Selecting a file slides a preview panel out from the bookshelf's inner edge over the
 chat (~50% of the pane). The client sends `bookshelf-read`; the handler replies by broadcast with
@@ -152,9 +164,11 @@ chat (~50% of the pane). The client sends `bookshelf-read`; the handler replies 
 Files over 5 MB are not read; the preview says so and offers the actions.
 
 **Chat-click capture.** A capture-phase `click`/`keydown` (Enter/Space) listener on `document`
-matching `#chat-stream [data-md-path]` calls `preventDefault` + `stopPropagation`, resolves the path
-(the link's `data-md-path` is already absolute, or cwd-joined by core), shelves it under "Opened" if
-it isn't already (`bookshelf-shelve`), then opens the panel focused on it with its preview.
+matching `#chat-stream [data-md-path]` calls `preventDefault` + `stopPropagation`, opens the panel,
+and sends `bookshelf-open-link { sessionId, path, requestId }` with the raw `data-md-path` (which may
+be `~/…` or a non-normalised cwd join). The handler canonicalises it, shelves it under "Opened" if not
+already shelved, and replies exactly like `bookshelf-read`. The reply's canonical `path` is what the
+client focuses and previews.
 
 **Context menu** (right-click or a row's ⋯): Download, Show in folder, Open, Open with ▸ (configured
 apps), Remove from bookshelf. Download reads the bytes as above and saves via an `<a download>` on a
@@ -166,14 +180,18 @@ rendered-markdown rules by carrying the same class as `.file-body`. Light/dark f
 
 ### Handlers
 
-All take `{ sessionId, path }` and **refuse any path not on that session's shelf**, so the browser
-cannot use them to read, reveal or open arbitrary files.
+All take `{ sessionId, path }`, canonicalise `path`, and (except `bookshelf-open-link`) **refuse any
+path not on that session's shelf**, so the browser cannot use them to read, reveal or open arbitrary
+files.
 
 - `bookshelf-read { requestId }` → broadcast as above.
+- `bookshelf-open-link { requestId }` → the only browser-side way onto the shelf, limited to what chat
+  links: an existing regular file ending `.md`/`.markdown` (the same scope as core's `GET /file`).
+  Shelves under "Opened" if needed, then replies as `bookshelf-read`.
 - `bookshelf-reveal` → macOS `open -R <p>`; Windows `explorer /select,<p>`; Linux `xdg-open <dir>`.
-- `bookshelf-open { app? }` → macOS `open [-a app] <p>`; Windows `start "" <p>` or `<app> <p>`;
+- `bookshelf-open { app? }` → macOS `open [-a app] <p>`; Windows `explorer.exe <p>` or `<app> <p>`;
   Linux `xdg-open <p>` or `<app> <p>`. `app` must be one of the configured apps.
-- `bookshelf-shelve` (chat click, shelf fixed to "Opened") and `bookshelf-unshelve`.
+- `bookshelf-unshelve`.
 
 Commands run with `execFile`/`spawn` and argument arrays (no shell), detached.
 
@@ -181,17 +199,20 @@ Commands run with `execFile`/`spawn` and argument arrays (no shell), detached.
 
 - Tool validation failures return `isError` with a plain message.
 - Handler failures throw, which core shows as a toast.
-- A read of a missing file replies `{ kind: 'missing' }`; the row is dimmed.
+- A read of a missing file replies `{ kind: 'missing' }`; the preview says so and the row is dimmed
+  from then on.
 
 ## Testing
 
-- `node --test`: store (add/dedupe/cap/remove/forget/persist), tools (caller resolution, validation,
-  default shelf), handlers (refuse unshelved paths, per-platform command construction with a stubbed
-  spawner, read kinds and size limits), tree building (grouping, nesting, compaction).
+- `node --test`: store (add/dedupe/cap/remove/forget/persist), canonicalise (`~`, `..`, symlinks),
+  tools (caller resolution, validation, default shelf), handlers (refuse unshelved paths, open-link
+  limited to existing markdown, per-platform command construction with a stubbed spawner, read kinds
+  and size limits), tree building (grouping, nesting, compaction).
 - Manual, in an isolated dev instance (`run-dev`): chip, open/close, side switch, collapse, preview of
   each kind, chat click redirect, context menu actions, light and dark themes, disable/enable.
 
 ## Known couplings (accepted)
 
-- `#sidebar` and `#chat-stream [data-md-path]` markup in core.
+- `#sidebar`, `#term-wrap`/`#chat-wrap` and `#chat-stream [data-md-path]` markup in core, plus
+  setting `position: relative` on `#sidebar`.
 - Bytes travel by broadcast to every open board. Harmless for a single local user; capped at 5 MB.
