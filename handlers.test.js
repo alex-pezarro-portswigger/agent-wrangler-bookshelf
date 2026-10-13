@@ -7,13 +7,12 @@ import { bookshelfHandlers, OPENED_SHELF } from './handlers.js';
 import { commandFor } from './os-open.js';
 import { BookshelfStore } from './store.js';
 
-function setup({ apps } = {}) {
+function setup() {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bookshelf-handlers-')));
   const runs = [];
-  const handlers = Object.fromEntries(bookshelfHandlers((cmd) => runs.push(cmd)).map((h) => [h.type, h.handler]));
+  const handlers = Object.fromEntries(bookshelfHandlers((cmd) => runs.push(cmd), (p) => runs.push(['chooser', p])).map((h) => [h.type, h.handler]));
   const host = {
     stores: { bookshelf: new BookshelfStore(path.join(dir, 'bookshelf.json')) },
-    settings: { get: (key) => (key === 'openWithApps' ? apps : undefined) },
     rebuilds: 0,
     broadcasts: [],
     async rebuild() { this.rebuilds++; },
@@ -47,7 +46,7 @@ test('read replies missing for a shelved file that has been deleted', async () =
 });
 
 test('read/reveal/open/unshelve refuse any path not on that session\'s shelf', async () => {
-  const { dir, host, runs, send, file } = setup({ apps: ['Editor'] });
+  const { dir, host, runs, send, file } = setup();
   const shelved = file('docs/plan.md');
   const other = file('secret.txt', 'secret');
   host.stores.bookshelf.add('CARD1', shelved, 'Plans');
@@ -63,8 +62,11 @@ test('read/reveal/open/unshelve refuse any path not on that session\'s shelf', a
     undefined,
   ];
   for (const type of ['read', 'reveal', 'open', 'unshelve']) {
-    for (const p of bad) await assert.rejects(send(type, { path: p, requestId: 'r' }), undefined, `${type} ${String(p)}`);
-    await assert.rejects(send(type, { path: shelved, sessionId: 'NOSUCH' }), /not on this session/);
+    for (const p of bad) {
+      await assert.rejects(send(type, { path: p, requestId: 'r' }), undefined, `${type} ${String(p)}`);
+      await assert.rejects(send(type, { path: p, chooser: true }), undefined, `${type} chooser ${String(p)}`);
+    }
+    await assert.rejects(send(type, { path: shelved, sessionId: 'NOSUCH', chooser: true }), /not on this session/);
   }
   assert.deepEqual(host.broadcasts, []);
   assert.deepEqual(runs, []);
@@ -80,32 +82,20 @@ test('reveal and open refuse a shelved file swapped for a symlink', async () => 
   fs.symlinkSync(secret, p);
   await assert.rejects(send('reveal', { path: p }), /changed/);
   await assert.rejects(send('open', { path: p }), /changed/);
+  await assert.rejects(send('open', { path: p, chooser: true }), /changed/);
   await send('read', { path: p, requestId: 'r' });
   assert.equal(host.broadcasts[0].kind, 'error');
   assert.deepEqual(runs, []);
 });
 
-test('reveal and open run the platform command without a shell', async () => {
-  const { host, runs, send, file } = setup({ apps: ['Editor'] });
+test('reveal, open and open with run the platform command or chooser without a shell', async () => {
+  const { host, runs, send, file } = setup();
   const p = file('plan.md');
   host.stores.bookshelf.add('CARD1', p, 'Plans');
   await send('reveal', { path: p });
   await send('open', { path: p });
-  await send('open', { path: p, app: 'Editor' });
-  assert.deepEqual(runs, [commandFor('reveal', p), commandFor('open', p), commandFor('open', p, 'Editor')]);
-});
-
-test('open refuses an app that is not configured', async () => {
-  const { host, runs, send, file } = setup({ apps: ['Editor'] });
-  const p = file('plan.md');
-  host.stores.bookshelf.add('CARD1', p, 'Plans');
-  for (const app of ['Terminal', 'editor', ['Editor'], { a: 1 }]) {
-    await assert.rejects(send('open', { path: p, app }), /Open with apps/);
-  }
-  const unset = setup();
-  unset.host.stores.bookshelf.add('CARD1', p, 'Plans');
-  await assert.rejects(unset.send('open', { path: p, app: 'Editor' }), /Open with apps/);
-  assert.deepEqual(runs, []);
+  await send('open', { path: p, chooser: true });
+  assert.deepEqual(runs, [commandFor('reveal', p), commandFor('open', p), ['chooser', p]]);
 });
 
 test('unshelve removes and rebuilds', async () => {

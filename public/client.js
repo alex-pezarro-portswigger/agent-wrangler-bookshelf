@@ -34,6 +34,7 @@ let side = 'right';
 let collapsed = new Set();
 let sessionId = null;
 let entries = [];
+let platform = null;
 let selected = null;
 let previewId = null;
 let reveal = null;
@@ -337,26 +338,15 @@ function remove(path) {
 }
 
 function menuEl(items) {
-  const level = menus.length;
   const menu = el('div', 'context-menu bks-menu');
   menu.setAttribute('role', 'menu');
   for (const it of items) {
     if (!it) { menu.append(el('div', 'context-menu-sep')); continue; }
-    if (it.header) { menu.append(el('div', 'context-menu-header', it.header)); continue; }
     const b = el('button', `context-menu-item${it.danger ? ' danger' : ''}`);
     b.type = 'button';
     b.setAttribute('role', 'menuitem');
     b.append(el('span', null, it.label));
-    if (it.submenu) {
-      const t = el('span', 'context-menu-trailing');
-      t.innerHTML = ICONS.chevron;
-      b.append(t);
-      b.addEventListener('mouseenter', () => openSubmenu(b, it.submenu));
-      b.addEventListener('click', () => openSubmenu(b, it.submenu).querySelector('.context-menu-item')?.focus());
-    } else {
-      b.addEventListener('mouseenter', () => menus.splice(level + 1).forEach((m) => m.remove()));
-      b.addEventListener('click', () => { closeMenus(); it.run(); });
-    }
+    b.addEventListener('click', () => { closeMenus(); it.run(); });
     menu.append(b);
   }
   document.body.append(menu);
@@ -372,30 +362,17 @@ function position(menu, x, y) {
 
 function openMenu(anchor, path) {
   closeMenus();
-  const apps = (api.settings()?.openWithApps || []).filter((a) => typeof a === 'string' && a);
-  const openWith = apps.length
-    ? apps.map((app) => ({ label: app, run: () => send('bookshelf-open', path, { app }) }))
-    : [{ header: 'No apps configured' }];
   const menu = menuEl([
     { label: 'Download', run: () => download(path) },
     { label: 'Show in folder', run: () => send('bookshelf-reveal', path) },
     { label: 'Open', run: () => send('bookshelf-open', path) },
-    { label: 'Open with', submenu: openWith },
+    ...(platform === 'darwin' || platform === 'win32' ? [{ label: 'Open with…', run: () => send('bookshelf-open', path, { chooser: true }) }] : []),
     null,
     { label: 'Remove from bookshelf', danger: true, run: () => remove(path) },
   ]);
   const at = anchor instanceof Element ? anchor.getBoundingClientRect() : null;
   position(menu, at ? at.left : anchor.x, at ? at.bottom + 2 : anchor.y);
   menu.querySelector('.context-menu-item')?.focus();
-}
-
-function openSubmenu(item, items) {
-  menus.splice(1).forEach((m) => m.remove());
-  const sub = menuEl(items);
-  const r = item.getBoundingClientRect();
-  const right = r.right + sub.offsetWidth < innerWidth;
-  position(sub, right ? r.right + 2 : r.left - sub.offsetWidth - 2, r.top);
-  return sub;
 }
 
 function closeMenus() {
@@ -479,6 +456,7 @@ function sync(session, graph) {
     if (root) closePreview();
   }
   entries = Array.isArray(graph?.bookshelf?.[sid]) ? graph.bookshelf[sid] : [];
+  platform = graph?.bookshelfPlatform;
   if (open) place();
   renderTree();
 }

@@ -1,6 +1,6 @@
 import fsp from 'node:fs/promises';
 import { normalise, isMarkdown, isMissing, readShelved, checkShelvedFile } from './safe-file.js';
-import { commandFor, runDetached } from './os-open.js';
+import { commandFor, runDetached, openWith } from './os-open.js';
 
 export const OPENED_SHELF = 'Opened';
 
@@ -15,16 +15,7 @@ async function replyFile(msg, host, p, file) {
   host.broadcast({ event: 'file', requestId: msg.requestId, sessionId: msg.sessionId, path: p, ...(file || await readShelved(p)) });
 }
 
-function configuredApp(app, host) {
-  if (app == null || app === '') return undefined;
-  const apps = host.settings.get('openWithApps');
-  if (typeof app !== 'string' || !Array.isArray(apps) || !apps.includes(app)) {
-    throw new Error('That app is not in the bookshelf\'s Open with apps setting.');
-  }
-  return app;
-}
-
-export function bookshelfHandlers(run = runDetached) {
+export function bookshelfHandlers(run = runDetached, choose = openWith) {
   return [
     {
       type: 'bookshelf-read',
@@ -66,9 +57,8 @@ export function bookshelfHandlers(run = runDetached) {
       type: 'bookshelf-open',
       async handler(msg, host) {
         const p = shelvedPath(msg, host);
-        const app = configuredApp(msg.app, host);
         await checkShelvedFile(p);
-        run(commandFor('open', p, app));
+        if (msg.chooser) choose(p); else run(commandFor('open', p));
       },
     },
     {

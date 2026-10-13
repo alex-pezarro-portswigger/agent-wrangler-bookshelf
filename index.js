@@ -20,17 +20,11 @@ export default {
   stores: { bookshelf: () => new BookshelfStore() },
   tools: [shelveFileTool, unshelveFileTool],
   handlers: bookshelfHandlers(),
-  graph: ({ host }) => ({ bookshelf: host.stores.bookshelf.snapshot() }),
+  graph: ({ host }) => ({ bookshelf: host.stores.bookshelf.snapshot(), bookshelfPlatform: process.platform }),
   // Archive keeps the shelf so a resume restores it; only the purge drops it.
   session: {
     onPurge: ({ sessionId, host }) => { host.stores.bookshelf.forget(sessionId); },
   },
-  settings: [{
-    key: 'openWithApps',
-    type: 'list',
-    label: 'Open with apps',
-    help: 'Apps offered under Open with… on a bookshelf file: app names on macOS (e.g. Visual Studio Code), or executable paths on Linux and Windows.',
-  }],
   skills: ['bookshelf'],
   client: 'public/client.js',
   styles: 'public/bookshelf.css',

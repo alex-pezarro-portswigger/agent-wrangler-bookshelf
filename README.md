@@ -8,8 +8,8 @@ An [Agent Wrangler](https://github.com/PortSwigger/agent-wrangler) extension tha
 - A book chip in the session header shows the count and opens the panel.
 - Clicking a markdown file link in the chat opens it on the bookshelf (under **Opened**) instead of
   the core preview.
-- Right-click a file to download it, show it in your file manager, open it, open it with one of the
-  apps in the **Open with apps** setting, or remove it from the shelf.
+- Right-click a file to download it, show it in your file manager, open it, open it with an app you
+  pick from the system's own chooser (macOS and Windows), or remove it from the shelf.
 
 Shelves are stored in `<AW_DATA_DIR>/bookshelf.json` (default `~/.agent-wrangler`). Archiving a
 session keeps its shelf; purging it removes it.
@@ -26,7 +26,7 @@ resolved); the browser can only read, reveal or open a file already on that sess
 add only existing markdown files from chat links. A shelved path is re-resolved at every use, so a
 file or folder swapped for a symlink after shelving is refused, and a read checks the open descriptor
 is the same regular file. Reads are capped at 5 MB. OS commands run without a shell, and **Open
-with** only accepts an app from the setting.
+with** only shows the system's app chooser; the file name reaches it as an argument, never as script.
 
 ## Develop
 

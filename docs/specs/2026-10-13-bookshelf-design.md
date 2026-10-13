@@ -42,7 +42,7 @@ Built purely on the existing extension API (host API 1.26). No core changes.
 - **GIVEN** the human clicks a markdown file in the chat that is not on the bookshelf **WHEN** the
   bookshelf opens **THEN** the file has been added to an "Opened" shelf and is focused.
 - **GIVEN** a file on the bookshelf **WHEN** the human right-clicks it **THEN** they can download
-  it, show it in their file manager, open it with their default app or a configured app, or remove
+  it, show it in their file manager, open it with their default app or one they pick from the system's own app chooser, or remove
   it from the shelf.
 - **GIVEN** the human prefers the bookshelf on the other side **WHEN** they switch sides **THEN** it
   stays on that side for future sessions.
@@ -95,7 +95,7 @@ README.md, LICENSE
 - `stores: { bookshelf }`, `graph: ({host}) => ({ bookshelf: host.stores.bookshelf.snapshot() })`.
 - `tools`, `handlers`, `skills: ['bookshelf']`, `client`, `styles`.
 - `session.onPurge` forgets the session's shelf (archive keeps it, as checklist does).
-- `settings`: one `list` setting, **Open with apps** (app names/paths offered under *Open with…*).
+- `graph` also carries `bookshelfPlatform` (`process.platform`), so the client can hide *Open with…* on Linux.
 
 ### Store
 
@@ -171,8 +171,8 @@ be `~/…` or a non-normalised cwd join). The handler canonicalises it, shelves 
 already shelved, and replies exactly like `bookshelf-read`. The reply's canonical `path` is what the
 client focuses and previews.
 
-**Context menu** (right-click or a row's ⋯): Download, Show in folder, Open, Open with ▸ (configured
-apps), Remove from bookshelf. Download reads the bytes as above and saves via an `<a download>` on a
+**Context menu** (right-click or a row's ⋯): Download, Show in folder, Open, Open with… (macOS and
+Windows only), Remove from bookshelf. Download reads the bytes as above and saves via an `<a download>` on a
 blob.
 
 **Theming.** CSS uses only core tokens (`--surface`, `--surface-2`, `--border-muted`, `--fg`,
@@ -190,8 +190,10 @@ files.
   links: an existing regular file ending `.md`/`.markdown` (the same scope as core's `GET /file`).
   Shelves under "Opened" if needed, then replies as `bookshelf-read`.
 - `bookshelf-reveal` → macOS `open -R <p>`; Windows `explorer /select,<p>`; Linux `xdg-open <dir>`.
-- `bookshelf-open { app? }` → macOS `open [-a app] <p>`; Windows `explorer.exe <p>` or `<app> <p>`;
-  Linux `xdg-open <p>` or `<app> <p>`. `app` must be one of the configured apps.
+- `bookshelf-open` → macOS `open <p>`; Windows `explorer.exe <p>`; Linux `xdg-open <p>`.
+- `bookshelf-open { chooser: true }` → the system app chooser. macOS runs `osascript` with a fixed
+  `choose application` script (the file name passed as an argument) and then `open -a <picked app> <p>`;
+  a cancel does nothing. Windows runs `rundll32.exe shell32.dll,OpenAs_RunDLL <p>`. Unsupported on Linux.
 - `bookshelf-unshelve`.
 
 Commands run with `execFile`/`spawn` and argument arrays (no shell), detached.
@@ -221,8 +223,8 @@ goes through one module (`safe-file.js`) that enforces:
   require a regular file within the size limit, then read from that descriptor, so the checked file
   is the one read. Directories, devices, FIFOs and sockets are refused.
 - **No shell.** OS commands run via `execFile`/`spawn` with argument arrays; paths are absolute
-  canonical paths, so they can't be read as options. `app` for *Open with* must exactly match one of
-  the configured apps; it is never taken from free text.
+  canonical paths, so they can't be read as options. *Open with* takes no app from the browser; the app
+  comes from the OS chooser, and the file name reaches AppleScript as an argument, never as script text.
 - **Rendering stays inert.** File names and text go in via `textContent`; markdown uses core's
   renderer (raw HTML escaped); images (including SVG) are shown through `<img>`, where scripts do not
   run.
