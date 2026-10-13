@@ -11,6 +11,22 @@ An [Agent Wrangler](https://github.com/PortSwigger/agent-wrangler) extension tha
 - Right-click a file to download it, show it in your file manager, open it, open it with an app you
   pick from the system's own chooser (macOS and Windows), or remove it from the shelf.
 
+Every session launch, fork and resume carries a one-line nudge pointing the agent at the skill, so
+Claude and Codex shelve plans (including ones written inside the repository), specs and the markdown
+they write for you without being asked.
+
+## What it looks like
+
+Look for the book chip with a count in the session header, next to the checklist chip. Clicking it
+slides the bookshelf in beside the chat; selecting a file slides its preview out of the bookshelf.
+The ⇆ button moves it to the other side.
+
+![The bookshelf open beside the chat in the dark theme, showing a Plans and a Scratchpad shelf with a plan previewed](docs/images/bookshelf-dark.png)
+
+Right-click a file (or use its ⋯) for its actions:
+
+![The bookshelf in the light theme with a file's context menu open: Download, Show in folder, Open, Open with…, Remove from bookshelf](docs/images/bookshelf-light-menu.png)
+
 Shelves are stored in `<AW_DATA_DIR>/bookshelf.json` (default `~/.agent-wrangler`). Archiving a
 session keeps its shelf; purging it removes it.
 
