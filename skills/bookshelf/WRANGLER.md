@@ -1,1 +1,1 @@
-This session has a bookshelf the human can see beside your chat on the Agent Wrangler board — put plans, specs, reports and any markdown you write for the human outside the repository on it with `shelve_file`. See the `bookshelf` skill before using it.
+This session has a bookshelf the human can see beside your chat on the Agent Wrangler board — write any plan you present to a markdown file and shelve it with `shelve_file` (`plan: true`), and shelve specs, reports and any markdown you write for the human outside the repository too. See the `bookshelf` skill before using it.

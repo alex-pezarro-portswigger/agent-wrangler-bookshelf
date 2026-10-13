@@ -7,12 +7,15 @@ import { shelveFileTool } from './shelve-file.js';
 import { unshelveFileTool } from './unshelve-file.js';
 import { BookshelfStore, MAX_ENTRIES } from '../store.js';
 
-function setup() {
+function setup(settings = {}) {
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bookshelf-tools-')));
   const host = {
     stores: { bookshelf: new BookshelfStore(path.join(dir, 'bookshelf.json')) },
     rebuilds: 0,
     async rebuild() { this.rebuilds++; },
+    settings: { get: (key) => settings[key] },
+    broadcasts: [],
+    broadcast(msg) { this.broadcasts.push(msg); },
   };
   const file = (name) => {
     const p = path.join(dir, name);
@@ -41,6 +44,26 @@ test('shelve_file shelves the canonical path on the caller\'s own shelf, default
   assert.deepEqual(host.stores.bookshelf.list('CARD2'), []);
   assert.equal(host.rebuilds, 1);
   assert.equal((await call(shelveFileTool, host, { path: p, shelf: '  Plans ' })).structuredContent.shelf, 'Plans');
+});
+
+test('shelve_file tells the agent to keep a plan out of chat unless plans are shown in chat', async () => {
+  const texts = (out) => out.content.map((c) => c.text);
+  const off = setup();
+  assert.equal(texts(await call(shelveFileTool, off.host, { path: off.file('p.md'), plan: true })).length, 2);
+  assert.equal(texts(await call(shelveFileTool, off.host, { path: off.file('n.md') })).length, 1);
+  const on = setup({ plansInChat: true });
+  assert.equal(texts(await call(shelveFileTool, on.host, { path: on.file('p.md'), plan: true })).length, 1);
+});
+
+test('shelve_file opens a plan in the browser only when autoOpenPlans is on', async () => {
+  const off = setup();
+  await call(shelveFileTool, off.host, { path: off.file('p.md'), plan: true });
+  assert.deepEqual(off.host.broadcasts, []);
+  const on = setup({ autoOpenPlans: true });
+  const p = on.file('p.md');
+  await call(shelveFileTool, on.host, { path: on.file('n.md') });
+  await call(shelveFileTool, on.host, { path: p, plan: true });
+  assert.deepEqual(on.host.broadcasts, [{ event: 'open', sessionId: 'CARD1', path: p }]);
 });
 
 test('shelve_file refuses missing, relative, non-regular and identity-less input', async () => {

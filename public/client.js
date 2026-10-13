@@ -82,6 +82,12 @@ function request(type, path, onReply) {
 }
 
 function onMessage(msg) {
+  if (msg?.event === 'open') {
+    if (msg.sessionId !== sessionId || !root) return;
+    if (!open) setOpen(true);
+    selectFile(msg.path);
+    return;
+  }
   if (msg?.event !== 'file') return;
   const handle = requests.get(msg.requestId);
   if (!handle) return;

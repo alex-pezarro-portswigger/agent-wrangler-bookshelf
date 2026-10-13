@@ -9,8 +9,9 @@ Your session has a bookshelf on the Agent Wrangler board: a panel beside the cha
 files you have put in front of the human, grouped into labelled shelves, with a preview. Two tools
 write it, both acting only on your own session:
 
-- `shelve_file({ path, shelf? })` — `path` is absolute (or `~/...`) and must be an existing file.
-  `shelf` defaults to the parent folder's name. Shelving a file again just moves it to `shelf`.
+- `shelve_file({ path, shelf?, plan? })` — `path` is absolute (or `~/...`) and must be an existing
+  file. `shelf` defaults to the parent folder's name. Shelving a file again just moves it to `shelf`.
+  Pass `plan: true` for a plan you are presenting to the human.
 - `unshelve_file({ path })`
 
 ## Shelve
@@ -19,6 +20,12 @@ write it, both acting only on your own session:
   example `docs/plans/`, `docs/superpowers/specs/`).
 - Any markdown you create outside the main repository: scratchpad notes, reports, summaries.
 - Outputs the human asked for or should review: generated reports, exported data, screenshots.
+
+## Plans
+
+When you have a plan for the human, write it to a markdown file and shelve it with `plan: true`
+(shelf `Plans`) before you reply. Follow any instruction in the tool's result about how to present
+it in chat.
 
 ## Don't shelve
 

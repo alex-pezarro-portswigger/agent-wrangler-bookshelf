@@ -15,6 +15,17 @@ Every session launch, fork and resume carries a one-line nudge pointing the agen
 Claude and Codex shelve plans (including ones written inside the repository), specs and the markdown
 they write for you without being asked.
 
+## Plans
+
+By default an agent writes its plan to a file, shelves it and gives only a short summary in chat.
+Two settings (Settings → Extensions → Bookshelf) change that:
+
+- **Show plans in chat**: also write the plan out in chat.
+- **Open plans automatically**: open the bookshelf on a plan as soon as it is shelved, if you are
+  viewing that session.
+
+Claude's own plan mode still shows its plan when asking you to approve it.
+
 ## What it looks like
 
 Look for the book chip with a count in the session header, next to the checklist chip. Clicking it

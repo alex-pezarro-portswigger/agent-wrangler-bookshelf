@@ -4,6 +4,9 @@ import { z } from 'zod';
 import { canonicalise, isMissing } from '../safe-file.js';
 import { MAX_SHELF_LENGTH } from '../store.js';
 
+const PLAN_REPLY = 'The human reads this plan on the bookshelf, so do not write it out in chat: reply with a '
+  + 'summary of two or three lines at most and say it is on the bookshelf.';
+
 // Caller-resolved: there is no session parameter, so an agent can only fill its own shelf.
 export const shelveFileTool = {
   name: 'shelve_file',
@@ -16,6 +19,7 @@ export const shelveFileTool = {
     path: z.string().min(1).describe('Absolute path (or ~/...) to an existing regular file.'),
     shelf: z.string().max(MAX_SHELF_LENGTH).optional()
       .describe('A label for the group it belongs in, e.g. "Plans", "Reports", "Scratchpad". Defaults to the parent folder\'s name.'),
+    plan: z.boolean().optional().describe('True when the file is a plan you are presenting to the human.'),
   },
   async handler({ host, caller }, args = {}) {
     if (caller == null) return errorResult('This request carried no session identity, so there is no bookshelf to add to.');
@@ -35,7 +39,12 @@ export const shelveFileTool = {
     }
     await host.rebuild();
     const structuredContent = { path: entry.path, shelf: entry.shelf };
-    return { content: [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }], structuredContent };
+    const content = [{ type: 'text', text: JSON.stringify(structuredContent, null, 2) }];
+    if (args.plan) {
+      if (!host.settings.get('plansInChat')) content.push({ type: 'text', text: PLAN_REPLY });
+      if (host.settings.get('autoOpenPlans')) host.broadcast({ event: 'open', sessionId: caller, path: entry.path });
+    }
+    return { content, structuredContent };
   },
 };
 

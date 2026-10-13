@@ -25,6 +25,20 @@ export default {
   session: {
     onPurge: ({ sessionId, host }) => { host.stores.bookshelf.forget(sessionId); },
   },
+  settings: [
+    {
+      key: 'plansInChat',
+      type: 'toggle',
+      label: 'Show plans in chat',
+      help: 'Off: an agent puts its plan on the bookshelf and gives only a short summary in chat. On: it also writes the plan out in chat.',
+    },
+    {
+      key: 'autoOpenPlans',
+      type: 'toggle',
+      label: 'Open plans automatically',
+      help: 'Open the bookshelf on a plan as soon as the agent shelves it, if you are viewing that session.',
+    },
+  ],
   skills: ['bookshelf'],
   client: 'public/client.js',
   styles: 'public/bookshelf.css',
