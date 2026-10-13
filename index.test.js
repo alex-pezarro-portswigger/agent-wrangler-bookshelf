@@ -15,7 +15,7 @@ test('handlers cover the contract and the skill ships', () => {
   assert.deepEqual(manifest.handlers.map((h) => h.type).sort(), [
     'bookshelf-open', 'bookshelf-open-link', 'bookshelf-read', 'bookshelf-reveal', 'bookshelf-unshelve',
   ]);
-  assert.deepEqual(manifest.tools.map((t) => t.name), ['shelve_file', 'unshelve_file']);
+  assert.deepEqual(manifest.tools.map((t) => t.name), ['shelve_file', 'unshelve_file', 'list_bookshelf']);
   for (const name of manifest.skills) assert.ok(fs.existsSync(`${dir}/skills/${name}/SKILL.md`));
 });
 

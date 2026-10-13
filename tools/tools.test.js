@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { shelveFileTool } from './shelve-file.js';
 import { unshelveFileTool } from './unshelve-file.js';
+import { listBookshelfTool } from './list-bookshelf.js';
 import { BookshelfStore, MAX_ENTRIES } from '../store.js';
 
 function setup(settings = {}) {
@@ -29,7 +30,7 @@ function setup(settings = {}) {
 const call = (tool, host, args, caller = 'CARD1') => tool.handler({ host, caller }, args);
 
 test('neither tool takes a session parameter', () => {
-  for (const tool of [shelveFileTool, unshelveFileTool]) {
+  for (const tool of [shelveFileTool, unshelveFileTool, listBookshelfTool]) {
     for (const key of Object.keys(tool.inputSchema)) assert.ok(!/session|card/i.test(key), `${tool.name}.${key}`);
   }
 });
@@ -100,4 +101,44 @@ test('unshelve_file removes by canonical path, and by the given path once the fi
   assert.equal((await call(unshelveFileTool, host, { path: a })).isError, true);
   assert.equal((await call(unshelveFileTool, host, { path: 'rel.md' })).isError, true);
   assert.equal((await call(unshelveFileTool, host, { path: a }, null)).isError, true);
+});
+
+function listHost(sessions, settings = {}) {
+  const { host } = setup(settings);
+  host.sessions = {
+    get: (id) => sessions.find((s) => s.sessionId === id) ?? null,
+    forTask: (taskId) => sessions.filter((s) => s.taskId === taskId),
+  };
+  return host;
+}
+
+test('list_bookshelf lists the caller\'s task shelves, own first, skipping empty siblings', async () => {
+  const host = listHost([
+    { sessionId: 'B', taskId: 'T', name: 'Sibling' },
+    { sessionId: 'A', taskId: 'T', name: 'Me' },
+    { sessionId: 'C', taskId: 'T', name: 'Empty' },
+    { sessionId: 'D', taskId: 'U', name: 'Other task' },
+  ]);
+  host.stores.bookshelf.add('B', '/b/plan.md', 'Plans');
+  host.stores.bookshelf.add('D', '/d/plan.md', 'Plans');
+  const out = (await call(listBookshelfTool, host, {}, 'A')).structuredContent;
+  assert.deepEqual(out, {
+    taskId: 'T',
+    shared: true,
+    sessions: [
+      { sessionId: 'A', name: 'Me', you: true, files: [] },
+      { sessionId: 'B', name: 'Sibling', you: false, files: [{ path: '/b/plan.md', shelf: 'Plans' }] },
+    ],
+  });
+});
+
+test('list_bookshelf shows only the caller\'s shelf when shelves are private or it has no task', async () => {
+  const sessions = [{ sessionId: 'A', taskId: 'T', name: 'Me' }, { sessionId: 'B', taskId: 'T', name: 'Sibling' }, { sessionId: 'N', taskId: null, name: 'Loose' }];
+  const priv = listHost(sessions, { privateShelves: true });
+  priv.stores.bookshelf.add('B', '/b/plan.md', 'Plans');
+  assert.deepEqual((await call(listBookshelfTool, priv, {}, 'A')).structuredContent.sessions.map((s) => s.sessionId), ['A']);
+  const loose = listHost(sessions);
+  loose.stores.bookshelf.add('B', '/b/plan.md', 'Plans');
+  assert.deepEqual((await call(listBookshelfTool, loose, {}, 'N')).structuredContent.sessions.map((s) => s.sessionId), ['N']);
+  assert.equal((await call(listBookshelfTool, loose, {}, null)).isError, true);
 });

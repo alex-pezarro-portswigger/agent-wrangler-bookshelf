@@ -1,5 +1,5 @@
-// Browser half: header chip, the bookshelf panel docked over the session pane,
-// file preview, context menu and chat-link capture. State lives at module level
+// Browser half: header chip, the bookshelf panel docked over the session pane
+// (or over the board for a task), file preview, context menu and chat-link capture. State lives at module level
 // because the chip host is rebuilt on every panel render.
 import { buildTree } from './tree.js';
 
@@ -7,6 +7,8 @@ const EXT_ID = 'bookshelf';
 const CHAT_LINK = '#chat-stream [data-md-path], .bks-preview [data-md-path]';
 
 const SVG = (inner) => `<svg class="bks-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
+const BOOK_PATH = '<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/>';
+const MENU_ICON = `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${BOOK_PATH}</svg>`;
 const ICONS = {
   book: SVG('<path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/>'),
   close: SVG('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
@@ -41,6 +43,12 @@ let sessionId = null;
 let entries = [];
 let platform = null;
 let selected = null;
+let selectedOwner = null;
+let scope = 'session';
+let taskId = null;
+let onBoard = false;
+let boardOpenedWith = null;
+let graph = null;
 let previewId = null;
 let reveal = null;
 let blobUrl = null;
@@ -68,24 +76,75 @@ function iconButton(icon, title, onClick, className = 'icon-ghost') {
   return b;
 }
 
-// ---- server traffic ----
+// ---- scope: one session's shelves, or every session's in its task ----
 
-function send(type, path, extra = {}) {
-  api.send({ type, sessionId, path, ...extra });
+const taskOf = (sid) => (sid && graph?.tasks?.assignments?.[sid]) || null;
+const inTask = () => scope === 'task' && Boolean(taskId);
+const taskName = (id) => graph?.tasks?.tasks?.find((t) => t.id === id)?.name || 'Task';
+
+function sessionName(sid) {
+  const s = graph?.sessions?.find((x) => x.sessionId === sid);
+  return s?.label || s?.intent || 'Session';
 }
 
-function request(type, path, onReply) {
+// Every entry carries its owning session: the server checks a path against that session's shelf.
+function shown() {
+  if (!inTask()) return entries.map((e) => ({ ...e, owner: sessionId }));
+  const order = graph?.tasks?.sessionOrder?.[taskId] || [];
+  const rank = (sid) => { const i = order.indexOf(sid); return i < 0 ? order.length : i; };
+  return Object.keys(graph?.bookshelf || {})
+    .filter((sid) => taskOf(sid) === taskId)
+    .sort((a, b) => rank(a) - rank(b))
+    .flatMap((sid) => graph.bookshelf[sid].map((e) => ({ ...e, owner: sid })));
+}
+
+function setScope(value) {
+  scope = value;
+  api.storage.set('scope', scope);
+  if (scope === 'task') taskId = taskOf(sessionId);
+  closePreview();
+  renderHead();
+  renderTree(true);
+}
+
+function openOnBoard(id) {
+  taskId = id;
+  scope = 'task';
+  onBoard = true;
+  boardOpenedWith = api.selectedSessionId();
+  if (open) closePreview();
+  renderHead();
+  setOpen(true);
+}
+
+function openInSession() {
+  onBoard = false;
+  scope = api.storage.get('scope') === 'task' ? 'task' : 'session';
+  taskId = taskOf(sessionId);
+  renderHead();
+  setOpen(true);
+}
+
+// ---- server traffic ----
+
+function send(type, path, extra = {}, owner = sessionId) {
+  api.send({ type, sessionId: owner, path, ...extra });
+}
+
+function request(type, path, onReply, owner = sessionId) {
   const requestId = `bks-${Date.now()}-${++seq}`;
   requests.set(requestId, onReply);
-  send(type, path, { requestId });
+  send(type, path, { requestId }, owner);
   return requestId;
 }
 
 function onMessage(msg) {
   if (msg?.event === 'open') {
-    if (msg.sessionId !== sessionId || !root) return;
+    if (!root) return;
+    const viewing = onBoard ? inTask() && taskOf(msg.sessionId) === taskId : msg.sessionId === sessionId;
+    if (!viewing) return;
     if (!open) setOpen(true);
-    selectFile(msg.path);
+    selectFile(msg.path, msg.sessionId);
     return;
   }
   if (msg?.event !== 'file') return;
@@ -113,7 +172,18 @@ function build() {
   const shelf = el('section', 'bks-shelf');
   shelf.setAttribute('aria-label', 'Bookshelf');
   const head = el('header', 'diff-head bks-head');
-  head.append(el('span', 'diff-title bks-title', 'Bookshelf'), iconButton('swap', 'Switch side', switchSide), iconButton('close', 'Close bookshelf', () => setOpen(false)));
+  els.title = el('span', 'diff-title bks-title', 'Bookshelf');
+  els.scope = el('div', 'bks-scope');
+  els.scope.setAttribute('role', 'group');
+  els.scope.setAttribute('aria-label', 'Show');
+  for (const [value, label] of [['session', 'Session'], ['task', 'Task']]) {
+    const b = el('button', null, label);
+    b.type = 'button';
+    b.dataset.scope = value;
+    b.addEventListener('click', () => { if (scope !== value) setScope(value); });
+    els.scope.append(b);
+  }
+  head.append(els.title, els.scope, iconButton('swap', 'Switch side', switchSide), iconButton('close', 'Close bookshelf', () => setOpen(false)));
   els.list = el('div', 'bks-list');
   els.empty = el('p', 'bks-empty', 'Nothing on the shelf yet.');
   shelf.append(head, els.list, els.empty);
@@ -123,7 +193,7 @@ function build() {
   const phead = el('header', 'diff-head bks-head');
   els.pTitle = el('span', 'diff-title bks-title');
   phead.append(els.pTitle,
-    iconButton('more', 'File actions', (e) => selected && openMenu(e.currentTarget, selected)),
+    iconButton('more', 'File actions', (e) => selected && openMenu(e.currentTarget, selected, selectedOwner)),
     iconButton('close', 'Close preview', closePreview));
   els.pBody = el('div', 'bks-preview-body');
   preview.append(phead, els.pBody);
@@ -131,9 +201,27 @@ function build() {
   root.append(preview, shelf);
 }
 
+function renderHead() {
+  if (!root) return;
+  els.title.textContent = inTask() ? taskName(taskId) : 'Bookshelf';
+  els.scope.hidden = onBoard || !taskOf(sessionId);
+  for (const b of els.scope.children) b.setAttribute('aria-pressed', String(b.dataset.scope === (inTask() ? 'task' : 'session')));
+}
+
 function place() {
+  if (!root) return;
+  const grid = document.getElementById('grid');
+  root.classList.toggle('on-board', onBoard);
+  if (onBoard && grid) {
+    if (root.parentNode !== grid.parentNode) grid.parentNode.appendChild(root);
+    root.style.top = '0px';
+    root.style.left = `${grid.offsetLeft}px`;
+    root.style.width = `${grid.offsetWidth}px`;
+    return;
+  }
+  root.style.left = root.style.width = '';
   const sidebar = document.getElementById('sidebar');
-  if (!root || !sidebar) return;
+  if (!sidebar) return;
   if (root.parentNode !== sidebar) sidebar.appendChild(root);
   const pane = ['chat-wrap', 'term-wrap'].map((id) => document.getElementById(id)).find((p) => p && !p.hidden && p.offsetParent);
   root.style.top = `${pane ? pane.offsetTop : 0}px`;
@@ -169,36 +257,56 @@ function toggleShelf(name) {
 
 function renderTree(force = false) {
   if (!root || !open) return;
-  const sig = JSON.stringify([sessionId, entries, selected, [...collapsed], [...missing]]);
+  const list = shown();
+  const task = inTask();
+  const sig = JSON.stringify([onBoard, task, taskId, sessionId, list, selected, selectedOwner, [...collapsed], [...missing]]);
   if (!force && sig === renderedSig) return;
   renderedSig = sig;
+  renderHead();
   const scroll = els.list.scrollTop;
-  const groups = buildTree(entries);
   if (reveal) {
-    const owner = entries.find((e) => e.path === reveal);
-    if (owner) collapsed.delete(owner.shelf || 'Shelf');
+    const hit = list.find((e) => e.path === reveal && e.owner === selectedOwner);
+    if (hit) {
+      collapsed.delete(task ? `${hit.owner}:${hit.shelf || 'Shelf'}` : hit.shelf || 'Shelf');
+      collapsed.delete(`session:${hit.owner}`);
+    }
   }
-  els.list.replaceChildren(...groups.map(shelfEl));
-  els.empty.hidden = entries.length > 0;
+  els.list.replaceChildren(...(task ? sessionGroups(list) : buildTree(list).map((g) => shelfEl(g, g.shelf))));
+  els.empty.textContent = task ? 'Nothing on this task\'s shelves yet.' : 'Nothing on the shelf yet.';
+  els.empty.hidden = list.length > 0;
   els.list.scrollTop = scroll;
   const row = reveal && els.list.querySelector('.bks-file.selected');
   if (row) { row.scrollIntoView({ block: 'nearest' }); reveal = null; }
 }
 
-function shelfEl(group) {
-  const shut = collapsed.has(group.shelf);
-  const wrap = el('div', `bks-group${shut ? ' collapsed' : ''}`);
+function groupEl(key, name, count, children, className = '') {
+  const shut = collapsed.has(key);
+  const wrap = el('div', `bks-group${className}${shut ? ' collapsed' : ''}`);
   const head = el('button', 'bks-group-head');
   head.type = 'button';
   head.setAttribute('aria-expanded', String(!shut));
   head.innerHTML = ICONS.chevron;
-  head.append(el('span', 'bks-group-name', group.shelf), el('span', 'bks-count', String(group.count)));
-  head.addEventListener('click', () => toggleShelf(group.shelf));
+  head.append(el('span', 'bks-group-name', name), el('span', 'bks-count', String(count)));
+  head.addEventListener('click', () => toggleShelf(key));
   const body = el('div', 'bks-nodes');
   body.hidden = shut;
-  body.append(...group.children.map((n) => nodeEl(n, 0)));
+  body.append(...children);
   wrap.append(head, body);
   return wrap;
+}
+
+function shelfEl(group, key, className) {
+  return groupEl(key, group.shelf, group.count, group.children.map((n) => nodeEl(n, 0)), className);
+}
+
+function sessionGroups(list) {
+  const bySession = new Map();
+  for (const e of list) {
+    if (!bySession.has(e.owner)) bySession.set(e.owner, []);
+    bySession.get(e.owner).push(e);
+  }
+  return [...bySession].map(([sid, own]) => groupEl(`session:${sid}`, sessionName(sid), own.length,
+    buildTree(own).map((g) => shelfEl(g, `${sid}:${g.shelf}`, ' bks-sub')), ' bks-session'));
 }
 
 function nodeEl(node, depth) {
@@ -213,18 +321,19 @@ function nodeEl(node, depth) {
     return wrap;
   }
   const row = el('div', 'bks-row bks-file');
-  row.classList.toggle('selected', node.path === selected);
+  const owner = node.entry.owner;
+  row.classList.toggle('selected', node.path === selected && owner === selectedOwner);
   row.classList.toggle('missing', missing.has(node.path));
   row.tabIndex = 0;
   row.title = node.path;
   row.style.paddingLeft = indent;
   row.innerHTML = isImage(node.path) ? ICONS.image : isText(node.path) ? ICONS.text : ICONS.file;
-  row.append(el('span', 'bks-name', node.name), iconButton('more', 'File actions', (e) => openMenu(e.currentTarget, node.path), 'bks-row-btn'));
-  row.addEventListener('click', () => selectFile(node.path));
+  row.append(el('span', 'bks-name', node.name), iconButton('more', 'File actions', (e) => openMenu(e.currentTarget, node.path, owner), 'bks-row-btn'));
+  row.addEventListener('click', () => selectFile(node.path, owner));
   row.addEventListener('keydown', (e) => {
-    if (e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); selectFile(node.path); }
+    if (e.target === row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); selectFile(node.path, owner); }
   });
-  row.addEventListener('contextmenu', (e) => { e.preventDefault(); openMenu({ x: e.clientX, y: e.clientY }, node.path); });
+  row.addEventListener('contextmenu', (e) => { e.preventDefault(); openMenu({ x: e.clientX, y: e.clientY }, node.path, owner); });
   return row;
 }
 
@@ -241,7 +350,8 @@ function setTitle(path) {
   els.pTitle.title = path;
 }
 
-function showPreview(type, path) {
+function showPreview(type, path, owner = sessionId) {
+  selectedOwner = owner;
   setTitle(path);
   status('Loading…');
   root.classList.add('previewing');
@@ -252,18 +362,19 @@ function showPreview(type, path) {
     setTitle(reply.path);
     renderPreview(reply);
     renderTree();
-  });
+  }, owner);
   previewId = id;
 }
 
-function selectFile(path) {
+function selectFile(path, owner = sessionId) {
   selected = path;
-  showPreview('bookshelf-read', path);
+  showPreview('bookshelf-read', path, owner);
   renderTree();
 }
 
 function closePreview() {
   selected = null;
+  selectedOwner = null;
   previewId = null;
   setBlob(null);
   root?.classList.remove('previewing');
@@ -276,8 +387,9 @@ function status(text, actions = false) {
   box.append(el('p', null, text));
   if (actions && selected) {
     const path = selected;
+    const owner = selectedOwner;
     const row = el('div', 'bks-actions');
-    for (const [label, fn] of [['Open', () => send('bookshelf-open', path)], ['Show in folder', () => send('bookshelf-reveal', path)]]) {
+    for (const [label, fn] of [['Open', () => send('bookshelf-open', path, {}, owner)], ['Show in folder', () => send('bookshelf-reveal', path, {}, owner)]]) {
       const b = el('button', null, label);
       b.type = 'button';
       b.addEventListener('click', fn);
@@ -325,10 +437,10 @@ function renderPreview(reply) {
 
 // ---- context menu ----
 
-function download(path) {
+function download(path, owner) {
   request('bookshelf-read', path, (reply) => {
     const blob = toBlob(reply);
-    if (!blob) { selectFile(path); return; }
+    if (!blob) { selectFile(path, owner); return; }
     const url = URL.createObjectURL(blob);
     const a = el('a');
     a.href = url;
@@ -337,13 +449,14 @@ function download(path) {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-  });
+  }, owner);
 }
 
-function remove(path) {
-  send('bookshelf-unshelve', path);
-  entries = entries.filter((e) => e.path !== path);
-  if (selected === path) closePreview();
+function remove(path, owner) {
+  send('bookshelf-unshelve', path, {}, owner);
+  if (owner === sessionId) entries = entries.filter((e) => e.path !== path);
+  if (graph?.bookshelf?.[owner]) graph = { ...graph, bookshelf: { ...graph.bookshelf, [owner]: graph.bookshelf[owner].filter((e) => e.path !== path) } };
+  if (selected === path && selectedOwner === owner) closePreview();
   renderTree();
   renderChips();
 }
@@ -372,15 +485,15 @@ function position(menu, x, y) {
   menu.style.top = `${Math.max(4, Math.min(y, innerHeight - height - 4))}px`;
 }
 
-function openMenu(anchor, path) {
+function openMenu(anchor, path, owner) {
   closeMenus();
   const menu = menuEl([
-    { label: 'Download', icon: 'download', run: () => download(path) },
-    { label: 'Show in folder', icon: 'reveal', run: () => send('bookshelf-reveal', path) },
-    { label: 'Open', icon: 'open', run: () => send('bookshelf-open', path) },
-    ...(platform === 'darwin' || platform === 'win32' ? [{ label: 'Open with…', icon: 'openWith', run: () => send('bookshelf-open', path, { chooser: true }) }] : []),
+    { label: 'Download', icon: 'download', run: () => download(path, owner) },
+    { label: 'Show in folder', icon: 'reveal', run: () => send('bookshelf-reveal', path, {}, owner) },
+    { label: 'Open', icon: 'open', run: () => send('bookshelf-open', path, {}, owner) },
+    ...(platform === 'darwin' || platform === 'win32' ? [{ label: 'Open with…', icon: 'openWith', run: () => send('bookshelf-open', path, { chooser: true }, owner) }] : []),
     null,
-    { label: 'Remove from bookshelf', icon: 'trash', danger: true, run: () => remove(path) },
+    { label: 'Remove from bookshelf', icon: 'trash', danger: true, run: () => remove(path, owner) },
   ]);
   const at = anchor instanceof Element ? anchor.getBoundingClientRect() : null;
   position(menu, at ? at.left : anchor.x, at ? at.bottom + 2 : anchor.y);
@@ -401,6 +514,7 @@ function onChatLink(e) {
   if (!stillEnabled()) { stop(); return; }
   e.preventDefault();
   e.stopPropagation();
+  if (onBoard) { onBoard = false; taskId = taskOf(sessionId); }
   setOpen(true);
   showPreview('bookshelf-open-link', hit.dataset.mdPath);
 }
@@ -421,19 +535,24 @@ function onKeyDown(e) {
 
 const LISTENERS = [['click', onChatLink], ['keydown', onChatLink], ['pointerdown', onPointerDown], ['keydown', onKeyDown]];
 
+const onResize = () => { if (open && onBoard) place(); };
+
 function start() {
   if (root) return;
   side = api.storage.get('side') === 'left' ? 'left' : 'right';
+  scope = api.storage.get('scope') === 'task' ? 'task' : 'session';
   try { collapsed = new Set(JSON.parse(api.storage.get('collapsed') || '[]')); } catch { collapsed = new Set(); }
   build();
   place();
   for (const [type, fn] of LISTENERS) document.addEventListener(type, fn, true);
+  window.addEventListener('resize', onResize);
   headObserver = new MutationObserver(() => { if (!stillEnabled()) stop(); });
   headObserver.observe(document.head, { childList: true });
 }
 
 function stop() {
   for (const [type, fn] of LISTENERS) document.removeEventListener(type, fn, true);
+  window.removeEventListener('resize', onResize);
   headObserver?.disconnect();
   headObserver = null;
   closeMenus();
@@ -442,7 +561,8 @@ function stop() {
   root = null;
   els = {};
   open = false;
-  selected = previewId = reveal = null;
+  onBoard = false;
+  selected = selectedOwner = previewId = reveal = null;
   renderedSig = '';
   requests.clear();
   chips.clear();
@@ -455,20 +575,28 @@ function renderChips() {
     const btn = host.querySelector('.bks-chip');
     if (!btn) continue;
     btn.hidden = !entries.length;
-    btn.setAttribute('aria-pressed', String(open));
-    btn.classList.toggle('showing', open);
+    btn.setAttribute('aria-pressed', String(open && !onBoard));
+    btn.classList.toggle('showing', open && !onBoard);
     btn.querySelector('.bks-chip-count').textContent = String(entries.length);
   }
 }
 
-function sync(session, graph) {
+// Opening another session while a task's shelves are over the board moves them beside its chat.
+function sync(session, g) {
+  graph = g;
   const sid = session?.sessionId || null;
-  if (sid !== sessionId) {
+  const moved = sid !== sessionId;
+  if (moved) {
     sessionId = sid;
+    if (root && !onBoard) closePreview();
+  }
+  if (onBoard && sid && sid !== boardOpenedWith) {
+    onBoard = false;
     if (root) closePreview();
   }
-  entries = Array.isArray(graph?.bookshelf?.[sid]) ? graph.bookshelf[sid] : [];
-  platform = graph?.bookshelfPlatform;
+  if (!onBoard && (moved || !taskId)) taskId = taskOf(sid);
+  entries = Array.isArray(g?.bookshelf?.[sid]) ? g.bookshelf[sid] : [];
+  platform = g?.bookshelfPlatform;
   if (open) place();
   renderTree();
 }
@@ -486,7 +614,10 @@ export default {
         btn.title = 'Bookshelf';
         btn.innerHTML = ICONS.book;
         btn.append(el('span', 'bks-chip-count'));
-        btn.addEventListener('click', (e) => { e.stopPropagation(); setOpen(!open); });
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (open && !onBoard) setOpen(false); else openInSession();
+        });
         host.append(btn);
         chips.add(host);
       },
@@ -496,6 +627,22 @@ export default {
         renderChips();
       },
       unmount(host) { chips.delete(host); },
+    });
+    reg.register('task.action', {
+      id: 'bookshelf-task',
+      items(task, g) {
+        if (task.adhoc) return [];
+        return [{ label: 'Open bookshelf', icon: MENU_ICON, run: () => { graph = g; platform = g?.bookshelfPlatform; openOnBoard(task.id); } }];
+      },
+    });
+    // Draws nothing: it is how the task shelves over the board hear about graph changes.
+    reg.register('task.body', {
+      id: 'bookshelf-graph',
+      mount() {},
+      update(host, ctx, g) {
+        graph = g;
+        if (open && onBoard) renderTree();
+      },
     });
     if (api.selectedSessionId()) api.requestPanelRender();
   },

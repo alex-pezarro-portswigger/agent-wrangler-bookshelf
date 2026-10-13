@@ -13,7 +13,7 @@
     "label": "Bookshelf",
     "description": "A per-session panel of the plans, specs and reports an agent wants you to see, with an in-place preview and open, reveal and download actions.",
     "author": "James Kinley",
-    "requires": ["board:rebuild", "board:broadcast"]
+    "requires": ["board:rebuild", "board:broadcast", "sessions:read"]
   },
   "dependencies": {
     "zod": "^3.25.76"

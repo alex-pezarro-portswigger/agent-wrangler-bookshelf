@@ -8,6 +8,11 @@ An [Agent Wrangler](https://github.com/PortSwigger/agent-wrangler) extension tha
 - A book chip in the session header shows the count and opens the panel.
 - Clicking a markdown file link in the chat opens it on the bookshelf (under **Opened**) instead of
   the core preview.
+- A task's ⋯ menu has **Open bookshelf**: every session's shelves in that task, one group per
+  session, over the board. Opening one of its sessions moves the panel beside that chat; the
+  **Session | Task** switch in its header flips between the session's own shelves and the task's.
+- Agents can list their task's shelves with `list_bookshelf`, so one session can pick up a plan or
+  spec another wrote. Turn on **Keep shelves private from other agents** to limit each to its own.
 - Right-click a file to download it, show it in your file manager, open it, open it with an app you
   pick from the system's own chooser (macOS and Windows), or remove it from the shelf.
 
@@ -44,7 +49,8 @@ session keeps its shelf; purging it removes it.
 ## Install
 
 In the wrangler's Extensions tab, install from this repository's git URL. It asks for
-`board:rebuild` and `board:broadcast`.
+`board:rebuild`, `board:broadcast` and `sessions:read` (to find a session's task for
+`list_bookshelf`).
 
 ## Security
 

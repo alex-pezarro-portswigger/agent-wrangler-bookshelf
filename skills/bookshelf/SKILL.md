@@ -14,6 +14,9 @@ write it, both acting only on your own session:
   Pass `plan: true` for a plan you are presenting to the human.
 - `unshelve_file({ path })`
 
+`list_bookshelf()` lists the shelves of every session in your task, your own included. Check it
+for plans and specs a sibling session wrote before you plan the same work again.
+
 ## Shelve
 
 - Plans, specs and design docs, wherever you write them, including inside the repository (for
