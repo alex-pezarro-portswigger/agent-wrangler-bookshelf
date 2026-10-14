@@ -2,6 +2,7 @@
 // (or over the board for a task), file preview, context menu and chat-link capture. State lives at module level
 // because the chip host is rebuilt on every panel render.
 import { buildTree } from './tree.js';
+import { clampWidth, dragWidth, DEFAULT_WIDTH } from './width.js';
 
 const EXT_ID = 'bookshelf';
 const CHAT_LINK = '#chat-stream [data-md-path], .bks-preview [data-md-path]';
@@ -40,6 +41,7 @@ let seq = 0;
 let open = false;
 let mini = false;
 let side = 'right';
+let width = DEFAULT_WIDTH;
 let collapsed = new Set();
 let sessionId = null;
 let entries = [];
@@ -60,6 +62,15 @@ const stillEnabled = () => Boolean(document.querySelector(`link[data-ext="${EXT_
 const basename = (p) => String(p).split(/[\\/]/).filter(Boolean).pop() || String(p);
 const isImage = (p) => /\.(png|jpe?g|gif|webp|svg)$/i.test(p);
 const isText = (p) => /\.(md|markdown|txt|log|json|ya?ml|csv)$/i.test(p);
+
+// Storage can throw (blocked site data, private windows); the panel works without it.
+function stored(key) {
+  try { return api.storage.get(key); } catch { return null; }
+}
+
+function store(key, value) {
+  try { api.storage.set(key, value); } catch { /* not remembered */ }
+}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -102,7 +113,7 @@ function shown() {
 
 function setScope(value) {
   scope = value;
-  api.storage.set('scope', scope);
+  store('scope', scope);
   if (scope === 'task') taskId = taskOf(sessionId);
   closePreview();
   renderHead();
@@ -121,7 +132,7 @@ function openOnBoard(id) {
 
 function openInSession() {
   onBoard = false;
-  scope = api.storage.get('scope') === 'task' ? 'task' : 'session';
+  scope = stored('scope') === 'task' ? 'task' : 'session';
   taskId = taskOf(sessionId);
   renderHead();
   setOpen(true);
@@ -191,7 +202,7 @@ function build() {
   els.empty = el('p', 'bks-empty', 'Nothing on the shelf yet.');
   const rail = el('div', 'bks-rail');
   rail.append(iconButton('book', 'Expand bookshelf', () => setMini(false)), iconButton('close', 'Close bookshelf', () => setOpen(false)));
-  shelf.append(head, els.list, els.empty, rail);
+  shelf.append(resizeHandle(), head, els.list, els.empty, rail);
 
   const preview = el('section', 'bks-preview');
   preview.setAttribute('aria-label', 'File preview');
@@ -207,9 +218,59 @@ function build() {
   root.classList.toggle('mini', mini);
 }
 
+// ---- width: a drag handle on the shelf's inner edge, remembered per viewer ----
+
+function applyWidth() {
+  if (!root) return;
+  root.style.setProperty('--bks-w-open', `${clampWidth(width, root.clientWidth)}px`);
+}
+
+function setWidth(value) {
+  width = clampWidth(value, root?.clientWidth);
+  applyWidth();
+}
+
+function resizeHandle() {
+  const handle = el('div', 'bks-resize');
+  handle.tabIndex = 0;
+  handle.title = 'Drag to resize, double-click to reset';
+  handle.setAttribute('role', 'separator');
+  handle.setAttribute('aria-orientation', 'vertical');
+  handle.setAttribute('aria-label', 'Resize bookshelf');
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = clampWidth(width, root.clientWidth);
+    handle.setPointerCapture(e.pointerId);
+    root.classList.add('resizing');
+    const move = (ev) => setWidth(dragWidth(startWidth, startX, ev.clientX, side));
+    const end = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', end);
+      handle.removeEventListener('pointercancel', end);
+      root?.classList.remove('resizing');
+      store('width', String(width));
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  });
+  handle.addEventListener('dblclick', () => { setWidth(DEFAULT_WIDTH); store('width', ''); });
+  handle.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const step = e.shiftKey ? 64 : 16;
+    const wider = (e.key === 'ArrowLeft') === (side === 'right');
+    setWidth(clampWidth(width, root.clientWidth) + (wider ? step : -step));
+    store('width', String(width));
+  });
+  return handle;
+}
+
 function setMini(value) {
   mini = value;
-  api.storage.set('mini', mini ? '1' : '');
+  store('mini', mini ? '1' : '');
   root?.classList.toggle('mini', mini);
 }
 
@@ -229,6 +290,7 @@ function place() {
     root.style.top = '0px';
     root.style.left = `${grid.offsetLeft}px`;
     root.style.width = `${grid.offsetWidth}px`;
+    applyWidth();
     return;
   }
   root.style.left = root.style.width = '';
@@ -237,6 +299,7 @@ function place() {
   if (root.parentNode !== sidebar) sidebar.appendChild(root);
   const pane = ['chat-wrap', 'term-wrap'].map((id) => document.getElementById(id)).find((p) => p && !p.hidden && p.offsetParent);
   root.style.top = `${pane ? pane.offsetTop : 0}px`;
+  applyWidth();
 }
 
 function setOpen(value) {
@@ -255,13 +318,13 @@ function setOpen(value) {
 
 function switchSide() {
   side = side === 'right' ? 'left' : 'right';
-  api.storage.set('side', side);
+  store('side', side);
   root.dataset.side = side;
 }
 
 function toggleShelf(name) {
   if (collapsed.has(name)) collapsed.delete(name); else collapsed.add(name);
-  api.storage.set('collapsed', JSON.stringify([...collapsed]));
+  store('collapsed', JSON.stringify([...collapsed]));
   renderTree(true);
 }
 
@@ -547,14 +610,15 @@ function onKeyDown(e) {
 
 const LISTENERS = [['click', onChatLink], ['keydown', onChatLink], ['pointerdown', onPointerDown], ['keydown', onKeyDown]];
 
-const onResize = () => { if (open && onBoard) place(); };
+const onResize = () => { if (open && onBoard) place(); else applyWidth(); };
 
 function start() {
   if (root) return;
-  side = api.storage.get('side') === 'left' ? 'left' : 'right';
-  mini = api.storage.get('mini') === '1';
-  scope = api.storage.get('scope') === 'task' ? 'task' : 'session';
-  try { collapsed = new Set(JSON.parse(api.storage.get('collapsed') || '[]')); } catch { collapsed = new Set(); }
+  side = stored('side') === 'left' ? 'left' : 'right';
+  mini = stored('mini') === '1';
+  width = clampWidth(stored('width'));
+  scope = stored('scope') === 'task' ? 'task' : 'session';
+  try { collapsed = new Set(JSON.parse(stored('collapsed') || '[]')); } catch { collapsed = new Set(); }
   build();
   place();
   for (const [type, fn] of LISTENERS) document.addEventListener(type, fn, true);
