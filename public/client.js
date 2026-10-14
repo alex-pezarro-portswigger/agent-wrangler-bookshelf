@@ -14,6 +14,7 @@ const ICONS = {
   close: SVG('<path d="M18 6 6 18"/><path d="m6 6 12 12"/>'),
   swap: SVG('<path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>'),
   chevron: SVG('<path d="m9 18 6-6-6-6"/>'),
+  collapse: SVG('<path d="m6 17 5-5-5-5"/><path d="m13 17 5-5-5-5"/>'),
   more: SVG('<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>'),
   folder: SVG('<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>'),
   text: SVG('<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>'),
@@ -37,6 +38,7 @@ const missing = new Set();
 let seq = 0;
 
 let open = false;
+let mini = false;
 let side = 'right';
 let collapsed = new Set();
 let sessionId = null;
@@ -183,10 +185,13 @@ function build() {
     b.addEventListener('click', () => { if (scope !== value) setScope(value); });
     els.scope.append(b);
   }
-  head.append(els.title, els.scope, iconButton('swap', 'Switch side', switchSide), iconButton('close', 'Close bookshelf', () => setOpen(false)));
+  head.append(els.title, els.scope, iconButton('collapse', 'Collapse bookshelf', () => setMini(true), 'icon-ghost bks-collapse'),
+    iconButton('swap', 'Switch side', switchSide), iconButton('close', 'Close bookshelf', () => setOpen(false)));
   els.list = el('div', 'bks-list');
   els.empty = el('p', 'bks-empty', 'Nothing on the shelf yet.');
-  shelf.append(head, els.list, els.empty);
+  const rail = el('div', 'bks-rail');
+  rail.append(iconButton('book', 'Expand bookshelf', () => setMini(false)), iconButton('close', 'Close bookshelf', () => setOpen(false)));
+  shelf.append(head, els.list, els.empty, rail);
 
   const preview = el('section', 'bks-preview');
   preview.setAttribute('aria-label', 'File preview');
@@ -199,6 +204,13 @@ function build() {
   preview.append(phead, els.pBody);
 
   root.append(preview, shelf);
+  root.classList.toggle('mini', mini);
+}
+
+function setMini(value) {
+  mini = value;
+  api.storage.set('mini', mini ? '1' : '');
+  root?.classList.toggle('mini', mini);
 }
 
 function renderHead() {
@@ -540,6 +552,7 @@ const onResize = () => { if (open && onBoard) place(); };
 function start() {
   if (root) return;
   side = api.storage.get('side') === 'left' ? 'left' : 'right';
+  mini = api.storage.get('mini') === '1';
   scope = api.storage.get('scope') === 'task' ? 'task' : 'session';
   try { collapsed = new Set(JSON.parse(api.storage.get('collapsed') || '[]')); } catch { collapsed = new Set(); }
   build();

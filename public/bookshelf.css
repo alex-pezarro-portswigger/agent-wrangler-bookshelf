@@ -8,7 +8,8 @@ main:has(> .bks) { position: relative; }
 .bks-chip.showing { color: var(--blue-fg); background: color-mix(in srgb, var(--accent) 18%, var(--surface-2)); }
 
 .bks {
-  --bks-w: 260px;
+  --bks-w-open: 260px;
+  --bks-w: var(--bks-w-open);
   position: absolute; left: 0; right: 0; bottom: 0; top: 0; z-index: 6;
   overflow: hidden; pointer-events: none;
   font-family: var(--font); color: var(--fg);
@@ -27,10 +28,10 @@ main:has(> .bks) { position: relative; }
     var(--bg);
   backdrop-filter: blur(6px);
   box-shadow: 0 8px 24px var(--shadow);
-  transition: transform .22s ease, visibility 0s linear .22s;
+  transition: transform .22s ease, width .22s ease, left .22s ease, right .22s ease, visibility 0s linear .22s;
 }
 .bks-shelf { width: var(--bks-w); z-index: 2; }
-.bks-preview { width: 50%; max-width: calc(100% - var(--bks-w)); z-index: 1; }
+.bks-preview { width: calc(50% + var(--bks-w-open) - var(--bks-w)); max-width: calc(100% - var(--bks-w)); z-index: 1; }
 
 .bks[data-side="right"] .bks-shelf { right: 0; border-left: 1px solid var(--border-muted); transform: translateX(100%); }
 .bks[data-side="right"] .bks-preview { right: var(--bks-w); border-left: 1px solid var(--border-muted); transform: translateX(100%); }
@@ -40,7 +41,7 @@ main:has(> .bks) { position: relative; }
 .bks.open .bks-shelf,
 .bks.open.previewing .bks-preview {
   transform: none; visibility: visible;
-  transition: transform .22s ease, visibility 0s;
+  transition: transform .22s ease, width .22s ease, left .22s ease, right .22s ease, visibility 0s;
 }
 
 /* Header is core's .diff-head / .diff-title / .icon-ghost; only the narrow-panel tweaks live here. */
@@ -127,3 +128,10 @@ main:has(> .bks) { position: relative; }
 .bks-session > .bks-group-head { text-transform: none; letter-spacing: 0; font-size: 12px; color: var(--fg-muted); }
 .bks-sub > .bks-group-head { padding-left: 24px; }
 .bks-sub .bks-row { margin-left: 14px; }
+
+/* Collapsed to a rail: the preview takes the width the shelf gave up. */
+.bks.mini { --bks-w: 36px; }
+.bks-rail { display: none; }
+.bks.mini .bks-shelf > :not(.bks-rail) { display: none; }
+.bks.mini .bks-rail { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; }
+.bks[data-side="left"] .bks-collapse .bks-icon { transform: rotate(180deg); }
