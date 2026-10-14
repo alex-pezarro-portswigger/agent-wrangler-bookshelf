@@ -1,5 +1,5 @@
 import fsp from 'node:fs/promises';
-import { normalise, isMarkdown, isImage, isMissing, readShelved, readShelvedImage, checkShelvedFile } from './safe-file.js';
+import { normalise, isMarkdown, isMissing, readShelved, readShelvedImage, checkShelvedFile } from './safe-file.js';
 import { commandFor, runDetached, openWith } from './os-open.js';
 
 export const OPENED_SHELF = 'Opened';
@@ -34,7 +34,7 @@ export function bookshelfHandlers(run = runDetached, choose = openWith) {
       },
     },
     {
-      // The only browser-side way onto the shelf, limited to what core links in chat: markdown and images.
+      // The only browser-side way onto the shelf, limited to what core links in chat: markdown.
       type: 'bookshelf-open-link',
       async handler(msg, host) {
         if (typeof msg.sessionId !== 'string' || !msg.sessionId) throw new Error('A session is required.');
@@ -46,7 +46,7 @@ export function bookshelfHandlers(run = runDetached, choose = openWith) {
           if (!isMissing(err)) throw err;
           return replyFile(msg, host, requested, { kind: 'missing', message: 'This file does not exist.' });
         }
-        if (!isMarkdown(p) && !isImage(p)) throw new Error('Only markdown and image files can be opened on the bookshelf from a link.');
+        if (!isMarkdown(p)) throw new Error('Only markdown files can be opened on the bookshelf from a link.');
         if (!(await fsp.stat(p)).isFile()) throw new Error('Not a regular file.');
         if (!host.stores.bookshelf.has(msg.sessionId, p)) {
           host.stores.bookshelf.add(msg.sessionId, p, OPENED_SHELF);

@@ -134,21 +134,13 @@ test('open-link replies missing for a file that does not exist, shelving nothing
   assert.deepEqual(host.stores.bookshelf.snapshot(), {});
 });
 
-test('open-link accepts an image file, shelving it under Opened', async () => {
-  const { host, send, file } = setup();
-  const p = file('shots/ui.png', Buffer.from([1, 2, 3]));
-  await send('open-link', { path: p, requestId: 'r1' });
-  assert.deepEqual(host.stores.bookshelf.list('CARD1').map((e) => [e.path, e.shelf]), [[p, OPENED_SHELF]]);
-  assert.equal(host.broadcasts[0].kind, 'image');
-  assert.equal(host.broadcasts[0].mime, 'image/png');
-});
-
-test('open-link only accepts existing markdown or image regular files', async () => {
+test('open-link only accepts existing markdown regular files', async () => {
   const { dir, host, send, file } = setup();
   const secret = file('secret.txt', 'secret');
+  const image = file('shots/ui.png', Buffer.from([1, 2, 3]));
   fs.symlinkSync(secret, path.join(dir, 'looks-like.md'));
   fs.mkdirSync(path.join(dir, 'folder.md'));
-  for (const p of [secret, path.join(dir, 'looks-like.md'), path.join(dir, 'folder.md'), 'rel.md', `${dir}/a\0.md`, null]) {
+  for (const p of [secret, image, path.join(dir, 'looks-like.md'), path.join(dir, 'folder.md'), 'rel.md', `${dir}/a\0.md`, null]) {
     await assert.rejects(send('open-link', { path: p, requestId: 'r' }), undefined, String(p));
   }
   await assert.rejects(send('open-link', { path: file('ok.md'), sessionId: undefined }), /session/);

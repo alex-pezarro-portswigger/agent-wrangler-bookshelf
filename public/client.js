@@ -447,10 +447,10 @@ function status(text, actions = false) {
 
 function renderPreview(reply) {
   if (reply.kind === 'missing') missing.add(reply.path); else missing.delete(reply.path);
+  revokeAssets();
   switch (reply.kind) {
     case 'markdown': {
       setBlob(null);
-      revokeAssets();
       const md = el('div', 'file-body bks-md');
       md.innerHTML = api.ui.markdownPreview(reply.text || '');
       resolveImages(md, reply.path, selectedOwner, previewId);
