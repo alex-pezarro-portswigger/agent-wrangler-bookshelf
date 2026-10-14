@@ -23,6 +23,9 @@ for plans and specs a sibling session wrote before you plan the same work again.
   example `docs/plans/`, `docs/superpowers/specs/`).
 - Any markdown you create outside the main repository: scratchpad notes, reports, summaries.
 - Outputs the human asked for or should review: generated reports, exported data, screenshots.
+  Shelve the screenshots you take (of a page, a UI, a diff) — a shelved image previews in place, and
+  an image you reference from a shelved markdown report (relative or absolute local path) renders in
+  the report's own preview, so shelve the images beside or under the report's folder.
 
 ## Plans
 

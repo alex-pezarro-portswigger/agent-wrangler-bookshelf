@@ -134,7 +134,16 @@ test('open-link replies missing for a file that does not exist, shelving nothing
   assert.deepEqual(host.stores.bookshelf.snapshot(), {});
 });
 
-test('open-link only accepts existing markdown regular files', async () => {
+test('open-link accepts an image file, shelving it under Opened', async () => {
+  const { host, send, file } = setup();
+  const p = file('shots/ui.png', Buffer.from([1, 2, 3]));
+  await send('open-link', { path: p, requestId: 'r1' });
+  assert.deepEqual(host.stores.bookshelf.list('CARD1').map((e) => [e.path, e.shelf]), [[p, OPENED_SHELF]]);
+  assert.equal(host.broadcasts[0].kind, 'image');
+  assert.equal(host.broadcasts[0].mime, 'image/png');
+});
+
+test('open-link only accepts existing markdown or image regular files', async () => {
   const { dir, host, send, file } = setup();
   const secret = file('secret.txt', 'secret');
   fs.symlinkSync(secret, path.join(dir, 'looks-like.md'));
@@ -145,4 +154,27 @@ test('open-link only accepts existing markdown regular files', async () => {
   await assert.rejects(send('open-link', { path: file('ok.md'), sessionId: undefined }), /session/);
   assert.deepEqual(host.stores.bookshelf.snapshot(), {});
   assert.deepEqual(host.broadcasts, []);
+});
+
+test('asset serves an image beside a shelved markdown file', async () => {
+  const { host, send, file } = setup();
+  const md = file('report.md');
+  file('shot.png', Buffer.from([1, 2, 3]));
+  host.stores.bookshelf.add('CARD1', md, 'Reports');
+  await send('asset', { path: md, ref: 'shot.png', requestId: 'r1' });
+  assert.deepEqual(host.broadcasts, [{
+    event: 'file', requestId: 'r1', sessionId: 'CARD1', path: md, ref: 'shot.png',
+    size: 3, kind: 'image', mime: 'image/png', base64: 'AQID',
+  }]);
+});
+
+test('asset refuses a reference out of the folder, and when the document is not shelved', async () => {
+  const { dir, host, send, file } = setup();
+  const md = file('docs/report.md');
+  file('secret.png', Buffer.from([9]));
+  host.stores.bookshelf.add('CARD1', md, 'Reports');
+  await send('asset', { path: md, ref: '../secret.png', requestId: 'r1' });
+  assert.equal(host.broadcasts[0].kind, 'error');
+  assert.match(host.broadcasts[0].message, /outside/i);
+  await assert.rejects(send('asset', { path: path.join(dir, 'unshelved.md'), ref: 'shot.png' }), /not on this session/);
 });

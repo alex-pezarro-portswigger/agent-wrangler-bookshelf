@@ -54,6 +54,7 @@ let graph = null;
 let previewId = null;
 let reveal = null;
 let blobUrl = null;
+let assetUrls = [];
 let renderedSig = '';
 
 const stillEnabled = () => Boolean(document.querySelector(`link[data-ext="${EXT_ID}"]`));
@@ -133,10 +134,10 @@ function send(type, path, extra = {}, owner = sessionId) {
   api.send({ type, sessionId: owner, path, ...extra });
 }
 
-function request(type, path, onReply, owner = sessionId) {
+function request(type, path, onReply, owner = sessionId, extra = {}) {
   const requestId = `bks-${Date.now()}-${++seq}`;
   requests.set(requestId, onReply);
-  send(type, path, { requestId }, owner);
+  send(type, path, { requestId, ...extra }, owner);
   return requestId;
 }
 
@@ -357,6 +358,37 @@ function setBlob(blob) {
   return blobUrl;
 }
 
+function revokeAssets() {
+  for (const url of assetUrls) URL.revokeObjectURL(url);
+  assetUrls = [];
+}
+
+// An <img> src that names a local file (not an http(s) or data: URL), as written in the markdown.
+// The raw attribute is read, not img.src, which the browser has already resolved against the board.
+function localImageRef(src) {
+  if (!src || /^(?:https?:|data:)/i.test(src)) return null;
+  return src;
+}
+
+// Embedded images in a markdown preview don't load on their own: a relative path resolves against
+// the board's origin and a local absolute one can't be fetched at all. Swap each local <img> for the
+// bytes the server reads beside the document (bookshelf-asset), tied to this preview via `token`.
+function resolveImages(container, mdPath, owner, token) {
+  for (const img of container.querySelectorAll('img')) {
+    const ref = localImageRef(img.getAttribute('src'));
+    if (!ref) continue;
+    img.removeAttribute('src'); // stop the doomed board-origin request before it fires
+    request('bookshelf-asset', mdPath, (reply) => {
+      if (token !== previewId) return;
+      const blob = reply.kind === 'image' && toBlob(reply);
+      if (!blob) { img.alt = img.alt || basename(ref); return; }
+      const url = URL.createObjectURL(blob);
+      assetUrls.push(url);
+      img.src = url;
+    }, owner, { ref });
+  }
+}
+
 function setTitle(path) {
   els.pTitle.textContent = basename(path);
   els.pTitle.title = path;
@@ -389,6 +421,7 @@ function closePreview() {
   selectedOwner = null;
   previewId = null;
   setBlob(null);
+  revokeAssets();
   root?.classList.remove('previewing');
   renderTree();
 }
@@ -417,8 +450,10 @@ function renderPreview(reply) {
   switch (reply.kind) {
     case 'markdown': {
       setBlob(null);
+      revokeAssets();
       const md = el('div', 'file-body bks-md');
       md.innerHTML = api.ui.markdownPreview(reply.text || '');
+      resolveImages(md, reply.path, selectedOwner, previewId);
       els.pBody.replaceChildren(md);
       break;
     }
@@ -570,6 +605,7 @@ function stop() {
   headObserver = null;
   closeMenus();
   setBlob(null);
+  revokeAssets();
   root?.remove();
   root = null;
   els = {};

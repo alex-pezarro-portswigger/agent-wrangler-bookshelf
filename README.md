@@ -6,8 +6,10 @@ An [Agent Wrangler](https://github.com/PortSwigger/agent-wrangler) extension tha
 
 - Agents shelve files with the `shelve_file` and `unshelve_file` tools, guided by the `bookshelf` skill.
 - A book chip in the session header shows the count and opens the panel.
-- Clicking a markdown file link in the chat opens it on the bookshelf (under **Opened**) instead of
-  the core preview.
+- Clicking a markdown or image file link in the chat opens it on the bookshelf (under **Opened**)
+  instead of the core preview.
+- Images embedded in a shelved markdown file render in its preview, whether referenced by a relative
+  path (`![](images/shot.png)`) or an absolute local one, so a report can carry its screenshots.
 - A task's ⋯ menu has **Open bookshelf**: every session's shelves in that task, one group per
   session, over the board. Opening one of its sessions moves the panel beside that chat; the
   **Session | Task** switch in its header flips between the session's own shelves and the task's.
@@ -56,7 +58,10 @@ In the wrangler's Extensions tab, install from this repository's git URL. It ask
 
 Every file operation goes through `safe-file.js`. Paths are canonicalised (`~`, `..` and symlinks
 resolved); the browser can only read, reveal or open a file already on that session's shelf, and can
-add only existing markdown files from chat links. A shelved path is re-resolved at every use, so a
+add only existing markdown or image files from chat links. An image embedded in a shelved markdown
+file is served only when it is an image type that resolves (symlinks included) to a file beside or
+under that document's own folder, so the preview can never be turned into an arbitrary read. A
+shelved path is re-resolved at every use, so a
 file or folder swapped for a symlink after shelving is refused, and a read checks the open descriptor
 is the same regular file. Reads are capped at 5 MB. OS commands run without a shell, and **Open
 with** only shows the system's app chooser; the file name reaches it as an argument, never as script.

@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
-  normalise, canonicalise, readShelved, checkShelvedFile, classify, MAX_READ_BYTES, MAX_TEXT_BYTES,
+  normalise, canonicalise, readShelved, readShelvedImage, checkShelvedFile, classify,
+  isImage, MAX_READ_BYTES, MAX_TEXT_BYTES,
 } from './safe-file.js';
 
 const tmp = () => fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'bookshelf-safe-')));
@@ -84,6 +85,58 @@ test('a file swapped for a symlink after shelving is refused', async () => {
   assert.equal(out.kind, 'error');
   assert.equal(out.text, undefined);
   await assert.rejects(checkShelvedFile(shelved), /changed/);
+});
+
+test('isImage matches image extensions case-insensitively', () => {
+  for (const p of ['/a.png', '/a.JPG', '/a.jpeg', '/a.gif', '/a.webp', '/a.SVG']) assert.ok(isImage(p), p);
+  for (const p of ['/a.md', '/a.txt', '/a.pdf', '/a']) assert.equal(isImage(p), false, p);
+});
+
+test('readShelvedImage serves an image beside or under the document', async () => {
+  const d = tmp();
+  const md = path.join(d, 'report.md');
+  fs.writeFileSync(md, '# r');
+  fs.writeFileSync(path.join(d, 'shot.png'), Buffer.from([1, 2, 3]));
+  fs.mkdirSync(path.join(d, 'images'));
+  fs.writeFileSync(path.join(d, 'images/deep.png'), Buffer.from([4, 5]));
+  // relative beside, relative under, and an absolute path inside the folder all resolve.
+  assert.deepEqual(await readShelvedImage(md, 'shot.png'), { size: 3, kind: 'image', mime: 'image/png', base64: 'AQID' });
+  assert.equal((await readShelvedImage(md, 'images/deep.png')).kind, 'image');
+  assert.equal((await readShelvedImage(md, './shot.png')).kind, 'image');
+  assert.equal((await readShelvedImage(md, path.join(d, 'shot.png'))).kind, 'image');
+  assert.equal((await readShelvedImage(md, `file://${path.join(d, 'shot.png')}`)).kind, 'image');
+});
+
+test('readShelvedImage refuses escapes, non-images and bad refs', async () => {
+  const d = tmp();
+  fs.mkdirSync(path.join(d, 'docs'));
+  const md = path.join(d, 'docs/report.md');
+  fs.writeFileSync(md, '# r');
+  fs.writeFileSync(path.join(d, 'secret.png'), Buffer.from([9]));
+  fs.writeFileSync(path.join(d, 'docs/note.txt'), 'x');
+  fs.writeFileSync(path.join(d, 'docs/plan.md'), '# p');
+  // climbing out of the document folder, even to an image, is refused.
+  assert.match((await readShelvedImage(md, '../secret.png')).message, /outside/i);
+  assert.match((await readShelvedImage(md, path.join(d, 'secret.png'))).message, /outside/i);
+  assert.match((await readShelvedImage(md, '~/secret.png')).message, /outside|no longer/i);
+  // a file in the folder that is not an image is refused before it is read.
+  assert.match((await readShelvedImage(md, 'note.txt')).message, /image/i);
+  assert.match((await readShelvedImage(md, 'plan.md')).message, /image/i);
+  // bad refs.
+  for (const bad of ['', '  ', undefined, 42, 'a\0b.png']) {
+    assert.equal((await readShelvedImage(md, bad)).kind, 'error', JSON.stringify(bad));
+  }
+  assert.equal((await readShelvedImage(md, 'gone.png')).kind, 'missing');
+});
+
+test('readShelvedImage refuses a symlink that points out of the document folder', async () => {
+  const d = tmp();
+  fs.mkdirSync(path.join(d, 'docs'));
+  const md = path.join(d, 'docs/report.md');
+  fs.writeFileSync(md, '# r');
+  fs.writeFileSync(path.join(d, 'outside.png'), Buffer.from([7]));
+  fs.symlinkSync(path.join(d, 'outside.png'), path.join(d, 'docs/link.png'));
+  assert.match((await readShelvedImage(md, 'link.png')).message, /outside/i);
 });
 
 test('a parent directory swapped for a symlink after shelving is refused', async () => {

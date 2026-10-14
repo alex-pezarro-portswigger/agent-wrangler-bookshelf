@@ -22,6 +22,7 @@ const MISSING = new Set(['ENOENT', 'ENOTDIR']);
 const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK } = fs.constants;
 
 export const isMarkdown = (p) => MARKDOWN.has(path.extname(p).toLowerCase());
+export const isImage = (p) => Boolean(IMAGE_MIME[path.extname(p).toLowerCase()]);
 export const isMissing = (err) => MISSING.has(err?.code);
 
 export function expandHome(p) {
@@ -68,6 +69,37 @@ export function classify(p, buf) {
 }
 
 const tooLarge = (size) => ({ kind: 'too-large', size, message: `This file is over ${MAX_READ_BYTES / 1024 / 1024} MB, so it is not previewed.` });
+
+// An image referenced from inside a shelved markdown file, served for its preview. `mdPath` is the
+// shelved document (already proven to be on the session's shelf by the caller); `ref` is the image
+// path as written in the markdown (relative, absolute, `~` or a file:// URL). The image must be an
+// image type that sits beside or under the document's own folder — a relative ref can't climb out
+// with `..`, an absolute one is held to the same boundary, and symlinks are resolved before the
+// check — so this never becomes an arbitrary read of the filesystem. Never throws, like readShelved.
+export async function readShelvedImage(mdPath, ref) {
+  try {
+    if (typeof ref !== 'string' || !ref) return { kind: 'error', message: 'No image reference.' };
+    if (ref.includes('\0')) return { kind: 'error', message: 'An image reference cannot contain NUL bytes.' };
+    let raw = ref;
+    if (/^file:\/\//i.test(raw)) {
+      try { raw = decodeURIComponent(new URL(raw).pathname); } catch { return { kind: 'error', message: 'Bad image URL.' }; }
+    } else {
+      try { raw = decodeURIComponent(raw); } catch { /* keep the raw form */ }
+    }
+    const base = await fsp.realpath(path.dirname(mdPath));
+    const abs = path.resolve(base, expandHome(raw));
+    if (!isImage(abs)) return { kind: 'error', message: 'Only images beside the document can be shown.' };
+    const real = await fsp.realpath(abs);
+    if (real !== base && !real.startsWith(base + path.sep)) {
+      return { kind: 'error', message: 'That image is outside the document\'s folder.' };
+    }
+    if (!isImage(real)) return { kind: 'error', message: 'Only images beside the document can be shown.' };
+    return readShelved(real);
+  } catch (err) {
+    if (isMissing(err)) return { kind: 'missing', message: 'This image no longer exists.' };
+    return { kind: 'error', message: err.message };
+  }
+}
 
 // Never throws: file problems come back as a `missing`/`too-large`/`error` kind.
 export async function readShelved(p) {
