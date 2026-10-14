@@ -11,7 +11,18 @@ export function clampWidth(value, space) {
   return Math.round(Math.min(Math.max(n, MIN_WIDTH), max));
 }
 
-// The width a drag gives: the handle sits on the shelf's inner edge, so dragging away from its side widens it.
+// The width a drag gives: each handle sits on its panel's inner edge, so dragging away from the docked side widens it.
 export function dragWidth(startWidth, startX, x, side) {
   return startWidth + (side === 'right' ? startX - x : x - startX);
+}
+
+// Preview width: the floor a drag or a stored value keeps it above.
+export const MIN_PREVIEW_WIDTH = 280;
+
+// A stored preview width, clamped so the shelf and preview together fit the space. Null keeps the CSS default.
+export function clampPreviewWidth(value, space, shelfWidth) {
+  const n = Number(value);
+  if (value == null || value === '' || !Number.isFinite(n) || n <= 0) return null;
+  const max = space > 0 ? Math.max(MIN_PREVIEW_WIDTH, space - shelfWidth) : Infinity;
+  return Math.round(Math.min(Math.max(n, MIN_PREVIEW_WIDTH), max));
 }

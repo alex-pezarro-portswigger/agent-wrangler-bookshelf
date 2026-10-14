@@ -8,7 +8,7 @@ main:has(> .bks) { position: relative; }
 .bks-chip.showing { color: var(--blue-fg); background: color-mix(in srgb, var(--accent) 18%, var(--surface-2)); }
 
 .bks {
-  /* Default only: client.js sets the dragged width inline (width.js DEFAULT_WIDTH). */
+  /* Defaults only: client.js sets the dragged widths inline (width.js); --bks-pw falls back to 50%. */
   --bks-w-open: 420px;
   --bks-w: var(--bks-w-open);
   position: absolute; left: 0; right: 0; bottom: 0; top: 0; z-index: 6;
@@ -32,7 +32,7 @@ main:has(> .bks) { position: relative; }
   transition: transform .22s ease, width .22s ease, left .22s ease, right .22s ease, visibility 0s linear .22s;
 }
 .bks-shelf { width: var(--bks-w); z-index: 2; }
-.bks-preview { width: calc(50% + var(--bks-w-open) - var(--bks-w)); max-width: calc(100% - var(--bks-w)); z-index: 1; }
+.bks-preview { width: calc(var(--bks-pw, 50%) + var(--bks-w-open) - var(--bks-w)); max-width: calc(100% - var(--bks-w)); z-index: 1; }
 
 .bks[data-side="right"] .bks-shelf { right: 0; border-left: 1px solid var(--border-muted); transform: translateX(100%); }
 .bks[data-side="right"] .bks-preview { right: var(--bks-w); border-left: 1px solid var(--border-muted); transform: translateX(100%); }
@@ -130,16 +130,18 @@ main:has(> .bks) { position: relative; }
 .bks-sub > .bks-group-head { padding-left: 24px; }
 .bks-sub .bks-row { margin-left: 14px; }
 
-/* Drag handle on the shelf's inner edge; the rail rule below hides it. */
+/* Drag handles on the shelf's and preview's inner edges; the rail rule below hides the shelf's. */
 .bks-resize {
   position: absolute; top: 0; bottom: 0; width: 6px; z-index: 3;
   cursor: col-resize; touch-action: none; background: transparent;
 }
 .bks[data-side="right"] .bks-resize { left: -3px; }
 .bks[data-side="left"] .bks-resize { right: -3px; }
-.bks-resize:hover, .bks-resize:focus-visible, .bks.resizing .bks-resize { background: var(--accent); outline: none; }
+.bks-resize:hover, .bks-resize:focus-visible, .bks-resize.dragging { background: var(--accent); outline: none; }
 .bks.resizing { user-select: none; }
-.bks.resizing .bks-shelf, .bks.resizing .bks-preview { transition: none; }
+/* Beats .bks.open.previewing .bks-preview, so neither panel trails the handle. */
+.bks.open.resizing .bks-shelf,
+.bks.open.previewing.resizing .bks-preview { transition: none; }
 
 /* Collapsed to a rail: the preview takes the width the shelf gave up. */
 .bks.mini { --bks-w: 36px; }

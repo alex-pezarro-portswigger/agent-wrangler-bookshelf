@@ -2,7 +2,7 @@
 // (or over the board for a task), file preview, context menu and chat-link capture. State lives at module level
 // because the chip host is rebuilt on every panel render.
 import { buildTree } from './tree.js';
-import { clampWidth, dragWidth, DEFAULT_WIDTH } from './width.js';
+import { clampWidth, clampPreviewWidth, dragWidth, DEFAULT_WIDTH } from './width.js';
 
 const EXT_ID = 'bookshelf';
 const CHAT_LINK = '#chat-stream [data-md-path], .bks-preview [data-md-path]';
@@ -42,6 +42,7 @@ let open = false;
 let mini = false;
 let side = 'right';
 let width = DEFAULT_WIDTH;
+let previewWidth = null;
 let collapsed = new Set();
 let sessionId = null;
 let entries = [];
@@ -62,15 +63,6 @@ const stillEnabled = () => Boolean(document.querySelector(`link[data-ext="${EXT_
 const basename = (p) => String(p).split(/[\\/]/).filter(Boolean).pop() || String(p);
 const isImage = (p) => /\.(png|jpe?g|gif|webp|svg)$/i.test(p);
 const isText = (p) => /\.(md|markdown|txt|log|json|ya?ml|csv)$/i.test(p);
-
-// Storage can throw (blocked site data, private windows); the panel works without it.
-function stored(key) {
-  try { return api.storage.get(key); } catch { return null; }
-}
-
-function store(key, value) {
-  try { api.storage.set(key, value); } catch { /* not remembered */ }
-}
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -113,7 +105,7 @@ function shown() {
 
 function setScope(value) {
   scope = value;
-  store('scope', scope);
+  api.storage.set('scope', scope);
   if (scope === 'task') taskId = taskOf(sessionId);
   closePreview();
   renderHead();
@@ -132,7 +124,7 @@ function openOnBoard(id) {
 
 function openInSession() {
   onBoard = false;
-  scope = stored('scope') === 'task' ? 'task' : 'session';
+  scope = api.storage.get('scope') === 'task' ? 'task' : 'session';
   taskId = taskOf(sessionId);
   renderHead();
   setOpen(true);
@@ -202,7 +194,7 @@ function build() {
   els.empty = el('p', 'bks-empty', 'Nothing on the shelf yet.');
   const rail = el('div', 'bks-rail');
   rail.append(iconButton('book', 'Expand bookshelf', () => setMini(false)), iconButton('close', 'Close bookshelf', () => setOpen(false)));
-  shelf.append(resizeHandle(), head, els.list, els.empty, rail);
+  shelf.append(resizeHandle(shelfSizer), head, els.list, els.empty, rail);
 
   const preview = el('section', 'bks-preview');
   preview.setAttribute('aria-label', 'File preview');
@@ -212,65 +204,98 @@ function build() {
     iconButton('more', 'File actions', (e) => selected && openMenu(e.currentTarget, selected, selectedOwner)),
     iconButton('close', 'Close preview', closePreview));
   els.pBody = el('div', 'bks-preview-body');
-  preview.append(phead, els.pBody);
+  preview.append(resizeHandle(previewSizer), phead, els.pBody);
 
   root.append(preview, shelf);
   root.classList.toggle('mini', mini);
 }
 
-// ---- width: a drag handle on the shelf's inner edge, remembered per viewer ----
+// ---- width: drag handles on the shelf's and preview's inner edges, remembered per viewer ----
 
 function applyWidth() {
   if (!root) return;
-  root.style.setProperty('--bks-w-open', `${clampWidth(width, root.clientWidth)}px`);
+  const shelfWidth = clampWidth(width, root.clientWidth);
+  root.style.setProperty('--bks-w-open', `${shelfWidth}px`);
+  const pw = clampPreviewWidth(previewWidth, root.clientWidth, shelfWidth);
+  if (pw == null) root.style.removeProperty('--bks-pw');
+  else root.style.setProperty('--bks-pw', `${pw}px`);
 }
 
-function setWidth(value) {
-  width = clampWidth(value, root?.clientWidth);
-  applyWidth();
+// Each handle drives one stored width; the preview's default is CSS's half of the space.
+const shelfSizer = {
+  label: 'Resize bookshelf',
+  current: () => clampWidth(width, root.clientWidth),
+  set(value) { width = clampWidth(value, root.clientWidth); applyWidth(); },
+  reset() { width = DEFAULT_WIDTH; applyWidth(); api.storage.set('width', ''); },
+  save() { api.storage.set('width', String(width)); },
+};
+
+const previewSizer = {
+  label: 'Resize preview',
+  // The preview also takes whatever width a collapsed shelf gives up; that extra isn't part of the stored width.
+  current() {
+    const rect = (sel) => root.querySelector(sel).getBoundingClientRect().width;
+    return rect('.bks-preview') - (clampWidth(width, root.clientWidth) - rect('.bks-shelf'));
+  },
+  set(value) { previewWidth = clampPreviewWidth(value, root.clientWidth, clampWidth(width, root.clientWidth)); applyWidth(); },
+  reset() { previewWidth = null; applyWidth(); api.storage.set('previewWidth', ''); },
+  save() { api.storage.set('previewWidth', previewWidth == null ? '' : String(previewWidth)); },
+};
+
+// Keyboard and double-click resizes jump straight to the new width, like a drag, instead of animating.
+function instantly(fn) {
+  root.classList.add('resizing');
+  fn();
+  void root.offsetWidth;
+  requestAnimationFrame(() => root?.classList.remove('resizing'));
 }
 
-function resizeHandle() {
+function resizeHandle(sizer) {
   const handle = el('div', 'bks-resize');
   handle.tabIndex = 0;
   handle.title = 'Drag to resize, double-click to reset';
   handle.setAttribute('role', 'separator');
   handle.setAttribute('aria-orientation', 'vertical');
-  handle.setAttribute('aria-label', 'Resize bookshelf');
+  handle.setAttribute('aria-label', sizer.label);
   handle.addEventListener('pointerdown', (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
     const startX = e.clientX;
-    const startWidth = clampWidth(width, root.clientWidth);
+    const startWidth = sizer.current();
     handle.setPointerCapture(e.pointerId);
     root.classList.add('resizing');
-    const move = (ev) => setWidth(dragWidth(startWidth, startX, ev.clientX, side));
+    handle.classList.add('dragging');
+    const move = (ev) => sizer.set(dragWidth(startWidth, startX, ev.clientX, side));
+    // lostpointercapture also covers capture lost another way, such as the window losing focus mid-drag.
     const end = () => {
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', end);
       handle.removeEventListener('pointercancel', end);
+      handle.removeEventListener('lostpointercapture', end);
       root?.classList.remove('resizing');
-      store('width', String(width));
+      handle.classList.remove('dragging');
+      sizer.save();
     };
     handle.addEventListener('pointermove', move);
     handle.addEventListener('pointerup', end);
     handle.addEventListener('pointercancel', end);
+    handle.addEventListener('lostpointercapture', end);
   });
-  handle.addEventListener('dblclick', () => { setWidth(DEFAULT_WIDTH); store('width', ''); });
+  handle.addEventListener('dblclick', () => instantly(() => sizer.reset()));
   handle.addEventListener('keydown', (e) => {
     if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
     e.preventDefault();
     const step = e.shiftKey ? 64 : 16;
     const wider = (e.key === 'ArrowLeft') === (side === 'right');
-    setWidth(clampWidth(width, root.clientWidth) + (wider ? step : -step));
-    store('width', String(width));
+    instantly(() => sizer.set(sizer.current() + (wider ? step : -step)));
+    sizer.save();
   });
   return handle;
 }
 
 function setMini(value) {
   mini = value;
-  store('mini', mini ? '1' : '');
+  api.storage.set('mini', mini ? '1' : '');
   root?.classList.toggle('mini', mini);
 }
 
@@ -318,13 +343,13 @@ function setOpen(value) {
 
 function switchSide() {
   side = side === 'right' ? 'left' : 'right';
-  store('side', side);
+  api.storage.set('side', side);
   root.dataset.side = side;
 }
 
 function toggleShelf(name) {
   if (collapsed.has(name)) collapsed.delete(name); else collapsed.add(name);
-  store('collapsed', JSON.stringify([...collapsed]));
+  api.storage.set('collapsed', JSON.stringify([...collapsed]));
   renderTree(true);
 }
 
@@ -614,11 +639,12 @@ const onResize = () => { if (open && onBoard) place(); else applyWidth(); };
 
 function start() {
   if (root) return;
-  side = stored('side') === 'left' ? 'left' : 'right';
-  mini = stored('mini') === '1';
-  width = clampWidth(stored('width'));
-  scope = stored('scope') === 'task' ? 'task' : 'session';
-  try { collapsed = new Set(JSON.parse(stored('collapsed') || '[]')); } catch { collapsed = new Set(); }
+  side = api.storage.get('side') === 'left' ? 'left' : 'right';
+  mini = api.storage.get('mini') === '1';
+  width = clampWidth(api.storage.get('width'));
+  previewWidth = clampPreviewWidth(api.storage.get('previewWidth'));
+  scope = api.storage.get('scope') === 'task' ? 'task' : 'session';
+  try { collapsed = new Set(JSON.parse(api.storage.get('collapsed') || '[]')); } catch { collapsed = new Set(); }
   build();
   place();
   for (const [type, fn] of LISTENERS) document.addEventListener(type, fn, true);
